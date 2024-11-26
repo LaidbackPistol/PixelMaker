@@ -139,37 +139,33 @@
             padding: 2px;
         }
 
-        .layer-name {
-            position: relative;
+        /* Replace or add these styles */
+        .layer-name-button {
             flex-grow: 1;
-            min-width: 0;  /* Important for text overflow */
+            text-align: left;
+            background: none;
+            border: none;
+            color: white;
+            padding: 4px 8px;
             cursor: pointer;
-            }
+            margin: 0;
+            font-size: inherit;
+            font-family: inherit;
+        }
 
-            .layer-name span {
-                display: block;
-                padding: 2px 4px;
-                overflow: hidden;
-                text-overflow: ellipsis;
-                white-space: nowrap;
-            }
+        .layer-name-button:hover {
+            background-color: #555;
+        }
 
-            .layer-name input {
-                width: 100%;
-                background-color: #555;
-                color: white;
-                border: 1px solid #666;
-                padding: 2px 4px;
-                font-family: Arial, sans-serif;
-                font-size: inherit;
-                outline: none;
-                position: absolute;
-                left: 0;
-                top: 50%;
-                transform: translateY(-50%);
-                height: 24px;
-                box-sizing: border-box;
-                z-index: 1;
+        .layer-name-input {
+            flex-grow: 1;
+            background-color: #555;
+            color: white;
+            border: 1px solid #666;
+            padding: 3px 7px;
+            margin: 0;
+            font-family: inherit;
+            font-size: inherit;
         }
 
         .layer-controls {
@@ -401,50 +397,49 @@
                 visibility.innerHTML = layer.visible ? '👁️' : '👁️‍🗨️';
                 visibility.onclick = () => toggleLayerVisibility(layer.id);
 
-                const nameContainer = document.createElement('div');
-                nameContainer.className = 'layer-name';
+                // Create name button
+                const nameButton = document.createElement('button');
+                nameButton.className = 'layer-name-button';
+                nameButton.textContent = layer.name;
+                nameButton.addEventListener('click', () => setActiveLayer(layer.id));
 
-                const nameSpan = document.createElement('span');
-                nameSpan.textContent = layer.name;
-                nameSpan.ondblclick = (e) => {
+                // Handle double click to edit
+                nameButton.addEventListener('dblclick', (e) => {
                     e.stopPropagation();
+                    e.preventDefault();
+                    
                     const input = document.createElement('input');
                     input.type = 'text';
                     input.value = layer.name;
-                    
-                    const saveLayerName = () => {
+                    input.className = 'layer-name-input';
+
+                    nameButton.replaceWith(input);
+                    input.focus();
+                    input.select();
+
+                    function saveNewName() {
                         const newName = input.value.trim();
                         if (newName && newName !== layer.name) {
                             if (layers.some(l => l.id !== layer.id && l.name === newName)) {
                                 alert('A layer with this name already exists. Please choose a different name.');
-                                input.focus();
                                 return;
                             }
                             layer.name = newName;
-                            renderLayerPanel();
                             saveState();
-                        } else {
-                            renderLayerPanel();
                         }
-                    };
+                        renderLayerPanel();
+                    }
 
-                    input.addEventListener('blur', saveLayerName);
+                    input.addEventListener('blur', saveNewName);
                     input.addEventListener('keydown', (e) => {
                         if (e.key === 'Enter') {
                             e.preventDefault();
-                            input.blur();
+                            saveNewName();
                         } else if (e.key === 'Escape') {
                             renderLayerPanel();
                         }
                     });
-
-                    nameContainer.appendChild(input);
-                    input.focus();
-                    input.select();
-                };
-
-                nameContainer.appendChild(nameSpan);
-                nameContainer.addEventListener('click', () => setActiveLayer(layer.id));
+                });
 
                 // Controls
                 const controls = document.createElement('div');
@@ -457,8 +452,9 @@
                     controls.appendChild(deleteBtn);
                 }
 
+                // Append everything in the correct order
                 layerItem.appendChild(visibility);
-                layerItem.appendChild(nameContainer);
+                layerItem.appendChild(nameButton);
                 layerItem.appendChild(controls);
                 layerList.appendChild(layerItem);
             });
