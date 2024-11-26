@@ -556,6 +556,71 @@
             importPaletteInput.click();
         });
 
+        // Import functionality
+        importButton.addEventListener('click', () => {
+            importInput.click();
+        });
+
+        importInput.addEventListener('change', (e) => {
+            const file = e.target.files[0];
+            if (!file) return;
+
+            const reader = new FileReader();
+            reader.onload = (e) => {
+                try {
+                    // Parse the SVG content
+                    const parser = new DOMParser();
+                    const svgDoc = parser.parseFromString(e.target.result, 'image/svg+xml');
+                    
+                    // Get all rectangles from the imported SVG
+                    const rects = svgDoc.getElementsByTagName('rect');
+                    
+                    // Create a new layer for the imported content
+                    const importLayer = createLayer();
+                    if (!importLayer) {
+                        alert('Maximum layer limit reached. Delete a layer before importing.');
+                        return;
+                    }
+
+                    // Convert NodeList to Array and sort by position for better organization
+                    Array.from(rects)
+                        .sort((a, b) => {
+                            const yDiff = parseFloat(a.getAttribute('y')) - parseFloat(b.getAttribute('y'));
+                            return yDiff || parseFloat(a.getAttribute('x')) - parseFloat(b.getAttribute('x'));
+                        })
+                        .forEach(rect => {
+                            // Create new rectangle in our format
+                            const newRect = document.createElementNS("http://www.w3.org/2000/svg", "rect");
+                            
+                            // Copy attributes
+                            const x = Math.floor(parseFloat(rect.getAttribute('x')) / gridSize) * gridSize;
+                            const y = Math.floor(parseFloat(rect.getAttribute('y')) / gridSize) * gridSize;
+                            
+                            newRect.setAttribute('x', x);
+                            newRect.setAttribute('y', y);
+                            newRect.setAttribute('width', gridSize);
+                            newRect.setAttribute('height', gridSize);
+                            newRect.setAttribute('fill', rect.getAttribute('fill'));
+                            
+                            importLayer.svg.appendChild(newRect);
+                        });
+
+                    // Set the imported layer as active
+                    setActiveLayer(importLayer.id);
+                    saveState();
+                    
+                    // Reset the input
+                    e.target.value = '';
+                    
+                } catch (error) {
+                    console.error('Error importing SVG:', error);
+                    alert('Error importing SVG. Please make sure the file is a valid SVG created with this tool.');
+                }
+            };
+            
+            reader.readAsText(file);
+        });
+
         // Save and load functionality
         function saveState() {
             if (isUndoRedoAction) {
