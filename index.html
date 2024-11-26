@@ -78,6 +78,7 @@
                               linear-gradient(to bottom, #cccccc05 1px, transparent 1px);
             background-size: 20px 20px;
             pointer-events: none;
+            touch-action: none; /* Prevent scrolling while drawing */
         }
 
         .svg-layer {
@@ -385,13 +386,20 @@
             addLayerButton.disabled = layers.length >= MAX_LAYERS;
         }
 
-        // Drawing functions
-        function drawPixel(e) {
-            if (!activeLayer) return;
-
+        function getTouchPosition(e) {
+            if (!activeLayer) return null;
+            
+            const touch = e.touches[0];
             const rect = activeLayer.getBoundingClientRect();
-            const x = Math.floor((e.clientX - rect.left) / gridSize) * gridSize;
-            const y = Math.floor((e.clientY - rect.top) / gridSize) * gridSize;
+            return {
+                x: Math.floor((touch.clientX - rect.left) / gridSize) * gridSize,
+                y: Math.floor((touch.clientY - rect.top) / gridSize) * gridSize
+            };
+        }
+        function drawPixelAtPosition(position) {
+            if (!position || !activeLayer) return;
+
+            const { x, y } = position;
 
             if (lastDrawnPixel && lastDrawnPixel.x === x && lastDrawnPixel.y === y) {
                 return;
@@ -425,6 +433,18 @@
             lastDrawnPixel = { x, y };
         }
 
+        // Modified drawPixel function for mouse events
+        function drawPixel(e) {
+            if (!activeLayer) return;
+
+            const rect = activeLayer.getBoundingClientRect();
+            const position = {
+                x: Math.floor((e.clientX - rect.left) / gridSize) * gridSize,
+                y: Math.floor((e.clientY - rect.top) / gridSize) * gridSize
+            };
+            drawPixelAtPosition(position);
+        }
+
         // Event listeners
         addLayerButton.addEventListener('click', createLayer);
 
@@ -453,7 +473,7 @@
             URL.revokeObjectURL(url);
         });
 
-        // Mouse event handlers for drawing
+        // Mouse event listeners
         document.addEventListener('mousedown', (e) => {
             if (e.target.closest('#svgCanvasContainer')) {
                 isDrawing = true;
@@ -483,6 +503,41 @@
             isDrawing = false;
             lastDrawnPixel = null;
         });
+
+        // Touch event listeners
+        svgCanvasContainer.addEventListener('touchstart', (e) => {
+            e.preventDefault(); // Prevent scrolling
+            isDrawing = true;
+            hasDrawnPixel = false;
+            const position = getTouchPosition(e);
+            drawPixelAtPosition(position);
+        }, { passive: false });
+
+        svgCanvasContainer.addEventListener('touchmove', (e) => {
+            e.preventDefault(); // Prevent scrolling
+            if (isDrawing) {
+                const position = getTouchPosition(e);
+                drawPixelAtPosition(position);
+            }
+        }, { passive: false });
+
+        svgCanvasContainer.addEventListener('touchend', (e) => {
+            e.preventDefault(); // Prevent any default touch behavior
+            if (isDrawing && hasDrawnPixel) {
+                saveState();
+            }
+            isDrawing = false;
+            lastDrawnPixel = null;
+        }, { passive: false });
+
+        svgCanvasContainer.addEventListener('touchcancel', (e) => {
+            e.preventDefault();
+            if (isDrawing && hasDrawnPixel) {
+                saveState();
+            }
+            isDrawing = false;
+            lastDrawnPixel = null;
+        }, { passive: false });
 
         // Palette color management
         paletteColorInput.addEventListener('change', (e) => {
