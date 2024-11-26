@@ -140,8 +140,36 @@
         }
 
         .layer-name {
+            position: relative;
             flex-grow: 1;
-            color: white;
+            min-width: 0;  /* Important for text overflow */
+            cursor: pointer;
+            }
+
+            .layer-name span {
+                display: block;
+                padding: 2px 4px;
+                overflow: hidden;
+                text-overflow: ellipsis;
+                white-space: nowrap;
+            }
+
+            .layer-name input {
+                width: 100%;
+                background-color: #555;
+                color: white;
+                border: 1px solid #666;
+                padding: 2px 4px;
+                font-family: Arial, sans-serif;
+                font-size: inherit;
+                outline: none;
+                position: absolute;
+                left: 0;
+                top: 50%;
+                transform: translateY(-50%);
+                height: 24px;
+                box-sizing: border-box;
+                z-index: 1;
         }
 
         .layer-controls {
@@ -233,16 +261,28 @@
         const addLayerButton = document.getElementById("addLayerButton");
         const svgCanvasContainer = document.getElementById("svgCanvasContainer");
 
-        // Layer Class
+        // Add Layer class
         class Layer {
             constructor(id) {
                 this.id = id;
-                this.name = `Layer ${id}`;
+                this.name = this.generateUniqueName();
                 this.visible = true;
                 this.svg = document.createElementNS("http://www.w3.org/2000/svg", "svg");
                 this.svg.setAttribute("class", "svg-layer");
                 this.svg.setAttribute("width", "500");
                 this.svg.setAttribute("height", "500");
+            }
+
+            generateUniqueName() {
+                let index = layers.length + 1;
+                let name = `Layer ${index}`;
+                
+                // Keep incrementing until we find a unique name
+                while (layers.some(layer => layer.name === name)) {
+                    index++;
+                    name = `Layer ${index}`;
+                }
+                return name;
             }
         }
 
@@ -355,16 +395,58 @@
                 const layerItem = document.createElement('div');
                 layerItem.className = `layer-item ${layer.id === activeLayerId ? 'selected' : ''}`;
 
+                // Visibility toggle
                 const visibility = document.createElement('span');
                 visibility.className = 'layer-visibility';
                 visibility.innerHTML = layer.visible ? '👁️' : '👁️‍🗨️';
                 visibility.onclick = () => toggleLayerVisibility(layer.id);
 
-                const name = document.createElement('span');
-                name.className = 'layer-name';
-                name.textContent = layer.name;
-                name.onclick = () => setActiveLayer(layer.id);
+                const nameContainer = document.createElement('div');
+                nameContainer.className = 'layer-name';
 
+                const nameSpan = document.createElement('span');
+                nameSpan.textContent = layer.name;
+                nameSpan.ondblclick = (e) => {
+                    e.stopPropagation();
+                    const input = document.createElement('input');
+                    input.type = 'text';
+                    input.value = layer.name;
+                    
+                    const saveLayerName = () => {
+                        const newName = input.value.trim();
+                        if (newName && newName !== layer.name) {
+                            if (layers.some(l => l.id !== layer.id && l.name === newName)) {
+                                alert('A layer with this name already exists. Please choose a different name.');
+                                input.focus();
+                                return;
+                            }
+                            layer.name = newName;
+                            renderLayerPanel();
+                            saveState();
+                        } else {
+                            renderLayerPanel();
+                        }
+                    };
+
+                    input.addEventListener('blur', saveLayerName);
+                    input.addEventListener('keydown', (e) => {
+                        if (e.key === 'Enter') {
+                            e.preventDefault();
+                            input.blur();
+                        } else if (e.key === 'Escape') {
+                            renderLayerPanel();
+                        }
+                    });
+
+                    nameContainer.appendChild(input);
+                    input.focus();
+                    input.select();
+                };
+
+                nameContainer.appendChild(nameSpan);
+                nameContainer.addEventListener('click', () => setActiveLayer(layer.id));
+
+                // Controls
                 const controls = document.createElement('div');
                 controls.className = 'layer-controls';
 
@@ -376,7 +458,7 @@
                 }
 
                 layerItem.appendChild(visibility);
-                layerItem.appendChild(name);
+                layerItem.appendChild(nameContainer);
                 layerItem.appendChild(controls);
                 layerList.appendChild(layerItem);
             });
