@@ -1,0 +1,603 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>SVG Pixel Art Tool with Layers</title>
+    <style>
+        body {
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            font-family: Arial, sans-serif;
+            margin: 0;
+            padding: 20px;
+            background-color: rgb(36, 36, 36);
+            color: white;
+        }
+
+        #toolbar {
+            margin-bottom: 10px;
+            display: flex;
+            gap: 10px;
+            align-items: center;
+        }
+
+        #colorPalette {
+            display: flex;
+            gap: 5px;
+            margin-bottom: 10px;
+        }
+
+        .palette-color {
+            width: 30px;
+            height: 30px;
+            cursor: pointer;
+            border: 2px solid transparent;
+            transition: border-color 0.2s;
+        }
+
+        .palette-color.selected {
+            border-color: white;
+        }
+
+        .eraser-tile {
+            width: 30px;
+            height: 30px;
+            cursor: pointer;
+            border: 2px solid transparent;
+            transition: border-color 0.2s;
+            background-image: 
+                linear-gradient(45deg, #808080 25%, transparent 25%),
+                linear-gradient(-45deg, #808080 25%, transparent 25%),
+                linear-gradient(45deg, transparent 75%, #808080 75%),
+                linear-gradient(-45deg, transparent 75%, #808080 75%);
+            background-size: 10px 10px;
+            background-position: 0 0, 0 5px, 5px -5px, -5px 0px;
+            background-color: white;
+        }
+
+        .eraser-tile.selected {
+            border-color: white;
+        }
+
+        #svgCanvasContainer {
+            position: relative;
+            width: 500px;
+            height: 500px;
+        }
+
+        #svgCanvasContainer::before {
+            content: "";
+            position: absolute;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            background-image: linear-gradient(to right, #cccccc05 1px, transparent 1px),
+                              linear-gradient(to bottom, #cccccc05 1px, transparent 1px);
+            background-size: 20px 20px;
+            pointer-events: none;
+        }
+
+        .svg-layer {
+            position: absolute;
+            top: 0;
+            left: 0;
+        }
+
+        #importInput, #paletteColorInput, #importPaletteInput {
+            display: none;
+        }
+
+        .button-group {
+            display: flex;
+            gap: 5px;
+            margin-bottom: 10px;
+        }
+
+        button {
+            background-color: #444;
+            color: white;
+            border: none;
+            padding: 5px 10px;
+            cursor: pointer;
+        }
+
+        button:disabled {
+            background-color: #333;
+            color: #666;
+            cursor: not-allowed;
+        }
+
+        #layerPanel {
+            width: 500px;
+            margin-top: 20px;
+            background-color: #333;
+            padding: 10px;
+            border-radius: 4px;
+        }
+
+        .layer-item {
+            display: flex;
+            align-items: center;
+            padding: 5px;
+            margin: 2px 0;
+            background-color: #444;
+            border-radius: 3px;
+            gap: 10px;
+        }
+
+        .layer-item.selected {
+            background-color: #555;
+            border: 1px solid #666;
+        }
+
+        .layer-visibility {
+            cursor: pointer;
+            padding: 2px;
+        }
+
+        .layer-name {
+            flex-grow: 1;
+            color: white;
+        }
+
+        .layer-controls {
+            display: flex;
+            gap: 5px;
+        }
+
+        #addLayerButton {
+            width: 100%;
+            margin-top: 5px;
+        }
+    </style>
+</head>
+<body>
+    <div id="colorPalette"></div>
+    <input type="color" id="paletteColorInput" />
+    <input type="file" id="importPaletteInput" accept=".svg" />
+
+    <div class="button-group">
+        <button id="resetPaletteButton">Reset Palette</button>
+        <button id="exportPaletteButton">Export Palette</button>
+        <button id="importPaletteButton">Import Palette</button>
+    </div>
+
+    <div class="button-group">
+        <button id="undoButton" disabled>Undo</button>
+        <button id="redoButton" disabled>Redo</button>
+    </div>
+
+    <div id="toolbar">
+        <button id="exportSVG">Export SVG</button>
+        <button id="importButton">Import SVG</button>
+        <input type="file" id="importInput" accept=".svg" />
+    </div>
+
+    <div id="svgCanvasContainer">
+        <!-- SVG layers will be dynamically added here -->
+    </div>
+
+    <div id="layerPanel">
+        <div id="layerList"></div>
+        <button id="addLayerButton">Add Layer</button>
+    </div>
+
+    <script>
+        // Global variables
+        let gridSize = 20;
+        let currentColor = "#000000";
+        let isDrawing = false;
+        let selectedPaletteIndex = 0;
+        let lastDrawnPixel = null;
+        let hasDrawnPixel = false;
+        
+        // History management
+        const MAX_HISTORY = 30;
+        let history = [];
+        let currentHistoryIndex = -1;
+        let isUndoRedoAction = false;
+
+        // Layer management
+        const MAX_LAYERS = 5;
+        let layers = [];
+        let activeLayer = null;
+        let activeLayerId = null;
+
+        // Default color palette
+        const defaultPalette = [
+            "#000000",
+            "#124559",
+            "#598392",
+            "#aec3b0",
+            "#ffffff"
+        ];
+        let palette = [...defaultPalette];
+
+        // DOM Elements
+        const colorPalette = document.getElementById("colorPalette");
+        const paletteColorInput = document.getElementById("paletteColorInput");
+        const importPaletteInput = document.getElementById("importPaletteInput");
+        const resetPaletteButton = document.getElementById("resetPaletteButton");
+        const exportPaletteButton = document.getElementById("exportPaletteButton");
+        const importPaletteButton = document.getElementById("importPaletteButton");
+        const undoButton = document.getElementById("undoButton");
+        const redoButton = document.getElementById("redoButton");
+        const importButton = document.getElementById("importButton");
+        const importInput = document.getElementById("importInput");
+        const layerPanel = document.getElementById("layerPanel");
+        const layerList = document.getElementById("layerList");
+        const addLayerButton = document.getElementById("addLayerButton");
+        const svgCanvasContainer = document.getElementById("svgCanvasContainer");
+
+        // Layer Class
+        class Layer {
+            constructor(id) {
+                this.id = id;
+                this.name = `Layer ${id}`;
+                this.visible = true;
+                this.svg = document.createElementNS("http://www.w3.org/2000/svg", "svg");
+                this.svg.setAttribute("class", "svg-layer");
+                this.svg.setAttribute("width", "500");
+                this.svg.setAttribute("height", "500");
+            }
+        }
+
+        // Initialize color palette
+        function initializePalette() {
+            colorPalette.innerHTML = '';
+            
+            const eraserTile = document.createElement('div');
+            eraserTile.className = 'eraser-tile';
+            eraserTile.setAttribute('data-index', 'eraser');
+            
+            eraserTile.addEventListener('click', () => {
+                document.querySelectorAll('.palette-color, .eraser-tile').forEach(el => {
+                    el.classList.remove('selected');
+                });
+                eraserTile.classList.add('selected');
+                currentColor = null;
+            });
+            
+            colorPalette.appendChild(eraserTile);
+
+            palette.forEach((color, index) => {
+                const paletteColor = document.createElement('div');
+                paletteColor.className = 'palette-color';
+                paletteColor.style.backgroundColor = color;
+                paletteColor.setAttribute('data-index', index);
+                
+                if (index === 0) {
+                    paletteColor.classList.add('selected');
+                }
+
+                paletteColor.addEventListener('click', () => {
+                    document.querySelectorAll('.palette-color, .eraser-tile').forEach(el => {
+                        el.classList.remove('selected');
+                    });
+                    
+                    paletteColor.classList.add('selected');
+                    currentColor = paletteColor.style.backgroundColor;
+                    selectedPaletteIndex = index;
+                });
+
+                paletteColor.addEventListener('dblclick', () => {
+                    paletteColorInput.value = color;
+                    paletteColorInput.setAttribute('data-index', index);
+                    paletteColorInput.click();
+                });
+
+                colorPalette.appendChild(paletteColor);
+            });
+        }
+
+        // Layer management functions
+        function initializeLayers() {
+            createLayer();
+            updateAddLayerButton();
+            renderLayerPanel();
+        }
+
+        function createLayer() {
+            if (layers.length >= MAX_LAYERS) return;
+
+            const newLayer = new Layer(layers.length + 1);
+            layers.push(newLayer);
+            svgCanvasContainer.appendChild(newLayer.svg);
+            
+            if (!activeLayer) {
+                setActiveLayer(newLayer.id);
+            }
+
+            updateAddLayerButton();
+            renderLayerPanel();
+            return newLayer;
+        }
+
+        function deleteLayer(layerId) {
+            const index = layers.findIndex(l => l.id === layerId);
+            if (index === -1) return;
+
+            const layer = layers[index];
+            svgCanvasContainer.removeChild(layer.svg);
+            layers.splice(index, 1);
+
+            if (activeLayerId === layerId) {
+                setActiveLayer(layers[layers.length - 1]?.id);
+            }
+
+            updateAddLayerButton();
+            renderLayerPanel();
+        }
+
+        function setActiveLayer(layerId) {
+            activeLayerId = layerId;
+            activeLayer = layers.find(l => l.id === layerId)?.svg;
+            renderLayerPanel();
+        }
+
+        function toggleLayerVisibility(layerId) {
+            const layer = layers.find(l => l.id === layerId);
+            if (layer) {
+                layer.visible = !layer.visible;
+                layer.svg.style.display = layer.visible ? 'block' : 'none';
+                renderLayerPanel();
+            }
+        }
+
+        function renderLayerPanel() {
+            layerList.innerHTML = '';
+            
+            layers.slice().reverse().forEach(layer => {
+                const layerItem = document.createElement('div');
+                layerItem.className = `layer-item ${layer.id === activeLayerId ? 'selected' : ''}`;
+
+                const visibility = document.createElement('span');
+                visibility.className = 'layer-visibility';
+                visibility.innerHTML = layer.visible ? '👁️' : '👁️‍🗨️';
+                visibility.onclick = () => toggleLayerVisibility(layer.id);
+
+                const name = document.createElement('span');
+                name.className = 'layer-name';
+                name.textContent = layer.name;
+                name.onclick = () => setActiveLayer(layer.id);
+
+                const controls = document.createElement('div');
+                controls.className = 'layer-controls';
+
+                if (layers.length > 1) {
+                    const deleteBtn = document.createElement('button');
+                    deleteBtn.textContent = '🗑️';
+                    deleteBtn.onclick = () => deleteLayer(layer.id);
+                    controls.appendChild(deleteBtn);
+                }
+
+                layerItem.appendChild(visibility);
+                layerItem.appendChild(name);
+                layerItem.appendChild(controls);
+                layerList.appendChild(layerItem);
+            });
+        }
+
+        function updateAddLayerButton() {
+            addLayerButton.disabled = layers.length >= MAX_LAYERS;
+        }
+
+        // Drawing functions
+        function drawPixel(e) {
+            if (!activeLayer) return;
+
+            const rect = activeLayer.getBoundingClientRect();
+            const x = Math.floor((e.clientX - rect.left) / gridSize) * gridSize;
+            const y = Math.floor((e.clientY - rect.top) / gridSize) * gridSize;
+
+            if (lastDrawnPixel && lastDrawnPixel.x === x && lastDrawnPixel.y === y) {
+                return;
+            }
+
+            const existingPixel = Array.from(activeLayer.children).find((rect) => {
+                return +rect.getAttribute("x") === x && +rect.getAttribute("y") === y;
+            });
+
+            if (existingPixel) {
+                if (currentColor) {
+                    if (existingPixel.getAttribute("fill") !== currentColor) {
+                        existingPixel.setAttribute("fill", currentColor);
+                        hasDrawnPixel = true;
+                    }
+                } else {
+                    activeLayer.removeChild(existingPixel);
+                    hasDrawnPixel = true;
+                }
+            } else if (currentColor) {
+                const newPixel = document.createElementNS("http://www.w3.org/2000/svg", "rect");
+                newPixel.setAttribute("x", x);
+                newPixel.setAttribute("y", y);
+                newPixel.setAttribute("width", gridSize);
+                newPixel.setAttribute("height", gridSize);
+                newPixel.setAttribute("fill", currentColor);
+                activeLayer.appendChild(newPixel);
+                hasDrawnPixel = true;
+            }
+
+            lastDrawnPixel = { x, y };
+        }
+
+        // Event listeners
+        addLayerButton.addEventListener('click', createLayer);
+
+        document.getElementById("exportSVG").addEventListener("click", () => {
+            const exportSvg = document.createElementNS("http://www.w3.org/2000/svg", "svg");
+            exportSvg.setAttribute("width", "500");
+            exportSvg.setAttribute("height", "500");
+
+            layers.forEach(layer => {
+                if (layer.visible) {
+                    Array.from(layer.svg.children).forEach(child => {
+                        exportSvg.appendChild(child.cloneNode(true));
+                    });
+                }
+            });
+
+            const serializer = new XMLSerializer();
+            const svgBlob = new Blob([serializer.serializeToString(exportSvg)], { type: "image/svg+xml" });
+            const url = URL.createObjectURL(svgBlob);
+
+            const link = document.createElement("a");
+            link.href = url;
+            link.download = "pixel-art.svg";
+            link.click();
+
+            URL.revokeObjectURL(url);
+        });
+
+        // Mouse event handlers for drawing
+        document.addEventListener('mousedown', (e) => {
+            if (e.target.closest('#svgCanvasContainer')) {
+                isDrawing = true;
+                hasDrawnPixel = false;
+                drawPixel(e);
+            }
+        });
+
+        document.addEventListener('mousemove', (e) => {
+            if (isDrawing && e.target.closest('#svgCanvasContainer')) {
+                drawPixel(e);
+            }
+        });
+
+        document.addEventListener('mouseup', () => {
+            if (isDrawing && hasDrawnPixel) {
+                saveState();
+            }
+            isDrawing = false;
+            lastDrawnPixel = null;
+        });
+
+        document.addEventListener('mouseleave', () => {
+            if (isDrawing && hasDrawnPixel) {
+                saveState();
+            }
+            isDrawing = false;
+            lastDrawnPixel = null;
+        });
+
+        // Palette color management
+        paletteColorInput.addEventListener('change', (e) => {
+            const index = parseInt(e.target.getAttribute('data-index'));
+            const newColor = e.target.value;
+            palette[index] = newColor;
+            initializePalette();
+        });
+
+        resetPaletteButton.addEventListener('click', () => {
+            palette = [...defaultPalette];
+            initializePalette();
+        });
+
+        importPaletteButton.addEventListener('click', () => {
+            importPaletteInput.click();
+        });
+
+        // Save and load functionality
+        function saveState() {
+            if (isUndoRedoAction) {
+                isUndoRedoAction = false;
+                return;
+            }
+
+            // Create a state object containing all layer information
+            const state = layers.map(layer => ({
+                id: layer.id,
+                name: layer.name,
+                visible: layer.visible,
+                content: layer.svg.innerHTML
+            }));
+
+            // Remove all states after current index
+            history = history.slice(0, currentHistoryIndex + 1);
+            history.push(JSON.stringify(state));
+            
+            if (history.length > MAX_HISTORY) {
+                history.shift();
+            }
+            
+            currentHistoryIndex = history.length - 1;
+            updateUndoRedoButtons();
+        }
+
+        function loadState(stateJson) {
+            const state = JSON.parse(stateJson);
+            
+            // Clear existing layers
+            while (svgCanvasContainer.firstChild) {
+                svgCanvasContainer.removeChild(svgCanvasContainer.firstChild);
+            }
+            layers = [];
+
+            // Recreate layers from state
+            state.forEach(layerState => {
+                const layer = new Layer(layerState.id);
+                layer.name = layerState.name;
+                layer.visible = layerState.visible;
+                layer.svg.innerHTML = layerState.content;
+                layer.svg.style.display = layer.visible ? 'block' : 'none';
+                layers.push(layer);
+                svgCanvasContainer.appendChild(layer.svg);
+            });
+
+            // Set active layer to the first visible layer
+            const visibleLayer = layers.find(l => l.visible);
+            if (visibleLayer) {
+                setActiveLayer(visibleLayer.id);
+            }
+
+            updateAddLayerButton();
+            renderLayerPanel();
+        }
+
+        function updateUndoRedoButtons() {
+            undoButton.disabled = currentHistoryIndex <= 0;
+            redoButton.disabled = currentHistoryIndex >= history.length - 1;
+        }
+
+        // Undo/Redo handlers
+        undoButton.addEventListener('click', () => {
+            if (currentHistoryIndex > 0) {
+                isUndoRedoAction = true;
+                currentHistoryIndex--;
+                loadState(history[currentHistoryIndex]);
+                updateUndoRedoButtons();
+            }
+        });
+
+        redoButton.addEventListener('click', () => {
+            if (currentHistoryIndex < history.length - 1) {
+                isUndoRedoAction = true;
+                currentHistoryIndex++;
+                loadState(history[currentHistoryIndex]);
+                updateUndoRedoButtons();
+            }
+        });
+
+        // Keyboard shortcuts
+        document.addEventListener('keydown', (e) => {
+            if (e.ctrlKey && !e.shiftKey && e.key.toLowerCase() === 'z') {
+                e.preventDefault();
+                undoButton.click();
+            } else if ((e.ctrlKey && !e.shiftKey && e.key.toLowerCase() === 'y') || 
+                      (e.ctrlKey && e.shiftKey && e.key.toLowerCase() === 'z')) {
+                e.preventDefault();
+                redoButton.click();
+            }
+        });
+
+        // Initialize the application
+        initializePalette();
+        initializeLayers();
+        saveState(); // Save initial empty state
+    </script>
+</body>
+</html>
