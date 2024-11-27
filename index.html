@@ -230,6 +230,7 @@
         let layers = [];
         let activeLayer = null;
         let activeLayerId = null;
+        let nextLayerId = 1; // Global counter for unique layer IDs
 
         // Default color palette
         const defaultPalette = [
@@ -257,10 +258,10 @@
         const addLayerButton = document.getElementById("addLayerButton");
         const svgCanvasContainer = document.getElementById("svgCanvasContainer");
 
-        // Add Layer class
+        // Updated Layer class
         class Layer {
-            constructor(id) {
-                this.id = id;
+            constructor() {
+                this.id = nextLayerId++;
                 this.name = this.generateUniqueName();
                 this.visible = true;
                 this.svg = document.createElementNS("http://www.w3.org/2000/svg", "svg");
@@ -270,13 +271,14 @@
             }
 
             generateUniqueName() {
-                let index = layers.length + 1;
-                let name = `Layer ${index}`;
+                let baseName = `Layer ${this.id}`;
+                let name = baseName;
+                let counter = 1;
                 
                 // Keep incrementing until we find a unique name
                 while (layers.some(layer => layer.name === name)) {
-                    index++;
-                    name = `Layer ${index}`;
+                    name = `${baseName} (${counter})`;
+                    counter++;
                 }
                 return name;
             }
@@ -337,10 +339,11 @@
             renderLayerPanel();
         }
 
+        // Modify the createLayer function
         function createLayer() {
             if (layers.length >= MAX_LAYERS) return;
 
-            const newLayer = new Layer(layers.length + 1);
+            const newLayer = new Layer();
             layers.push(newLayer);
             svgCanvasContainer.appendChild(newLayer.svg);
             
