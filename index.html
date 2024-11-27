@@ -332,14 +332,12 @@
             });
         }
 
-        // Layer management functions
         function initializeLayers() {
             createLayer();
             updateAddLayerButton();
             renderLayerPanel();
         }
 
-        // Modify the createLayer function
         function createLayer() {
             if (layers.length >= MAX_LAYERS) return;
 
@@ -353,6 +351,7 @@
 
             updateAddLayerButton();
             renderLayerPanel();
+            saveState(); // Save state after creating layer
             return newLayer;
         }
 
@@ -370,6 +369,7 @@
 
             updateAddLayerButton();
             renderLayerPanel();
+            saveState(); // Save state after deleting layer
         }
 
         function setActiveLayer(layerId) {
@@ -384,6 +384,7 @@
                 layer.visible = !layer.visible;
                 layer.svg.style.display = layer.visible ? 'block' : 'none';
                 renderLayerPanel();
+                saveState(); // Save state after toggling visibility
             }
         }
 
@@ -709,13 +710,16 @@
                 return;
             }
 
-            // Create a state object containing all layer information
-            const state = layers.map(layer => ({
-                id: layer.id,
-                name: layer.name,
-                visible: layer.visible,
-                content: layer.svg.innerHTML
-            }));
+            // Create a state object containing all layer information and nextLayerId
+            const state = {
+                nextLayerId: nextLayerId,
+                layers: layers.map(layer => ({
+                    id: layer.id,
+                    name: layer.name,
+                    visible: layer.visible,
+                    content: layer.svg.innerHTML
+                }))
+            };
 
             // Remove all states after current index
             history = history.slice(0, currentHistoryIndex + 1);
@@ -729,8 +733,11 @@
             updateUndoRedoButtons();
         }
 
-        function loadState(stateJson) {
+       function loadState(stateJson) {
             const state = JSON.parse(stateJson);
+            
+            // Restore nextLayerId from state
+            nextLayerId = state.nextLayerId;
             
             // Clear existing layers
             while (svgCanvasContainer.firstChild) {
@@ -739,8 +746,10 @@
             layers = [];
 
             // Recreate layers from state
-            state.forEach(layerState => {
-                const layer = new Layer(layerState.id);
+            state.layers.forEach(layerState => {
+                const layer = new Layer();
+                // Override the generated ID and name with the saved ones
+                layer.id = layerState.id;
                 layer.name = layerState.name;
                 layer.visible = layerState.visible;
                 layer.svg.innerHTML = layerState.content;
@@ -795,10 +804,14 @@
             }
         });
 
-        // Initialize the application
-        initializePalette();
-        initializeLayers();
-        saveState(); // Save initial empty state
+        function initializeApp() {
+            initializePalette();
+            initializeLayers();
+            // Save initial state with nextLayerId
+            saveState();
+        }
+
+        initializeApp();
     </script>
 </body>
 </html>
