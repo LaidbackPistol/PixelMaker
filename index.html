@@ -709,14 +709,15 @@
             }
         }
 
-        function createPixelPath(x, y, color) {
+        function createPixelPath(gridX, gridY, color) {
             const path = document.createElementNS("http://www.w3.org/2000/svg", "path");
             path.setAttribute("fill", color);
-            updatePixelPath(path, x, y);
+            updatePixelPath(path, gridX, gridY);
             return path;
         }
 
-        function updatePixelPath(path, x, y) {
+        function updatePixelPath(path, gridX, gridY) {
+            const screenPos = gridToScreenCoordinates(gridX, gridY);
             const size = gridSize;
             const bend = bendAmount;
             
@@ -724,21 +725,21 @@
             const cp = Math.abs(bend);
             const sign = Math.sign(bend);
             
-            // Create path with curved edges
+            // Create path with curved edges using screen coordinates
             let d = [
-                `M ${x} ${y}`,
+                `M ${screenPos.x} ${screenPos.y}`,
                 
                 // Top edge (curved)
-                `C ${x + cp} ${y - sign * cp}, ${x + size - cp} ${y - sign * cp}, ${x + size} ${y}`,
+                `C ${screenPos.x + cp} ${screenPos.y - sign * cp}, ${screenPos.x + size - cp} ${screenPos.y - sign * cp}, ${screenPos.x + size} ${screenPos.y}`,
                 
                 // Right edge (curved)
-                `C ${x + size + sign * cp} ${y + cp}, ${x + size + sign * cp} ${y + size - cp}, ${x + size} ${y + size}`,
+                `C ${screenPos.x + size + sign * cp} ${screenPos.y + cp}, ${screenPos.x + size + sign * cp} ${screenPos.y + size - cp}, ${screenPos.x + size} ${screenPos.y + size}`,
                 
                 // Bottom edge (curved)
-                `C ${x + size - cp} ${y + size + sign * cp}, ${x + cp} ${y + size + sign * cp}, ${x} ${y + size}`,
+                `C ${screenPos.x + size - cp} ${screenPos.y + size + sign * cp}, ${screenPos.x + cp} ${screenPos.y + size + sign * cp}, ${screenPos.x} ${screenPos.y + size}`,
                 
                 // Left edge (curved)
-                `C ${x - sign * cp} ${y + size - cp}, ${x - sign * cp} ${y + cp}, ${x} ${y}`,
+                `C ${screenPos.x - sign * cp} ${screenPos.y + size - cp}, ${screenPos.x - sign * cp} ${screenPos.y + cp}, ${screenPos.x} ${screenPos.y}`,
                 
                 'Z'
             ].join(' ');
@@ -746,7 +747,6 @@
             path.setAttribute('d', d);
         }
 
-        // Update sliders' event listeners
         bendSlider.addEventListener('input', (e) => {
             bendAmount = parseFloat(e.target.value);
             bendValue.textContent = bendAmount.toFixed(1);
@@ -783,28 +783,14 @@
             layers.forEach(layer => {
                 Array.from(layer.svg.children).forEach(pixel => {
                     if (pixel.tagName.toLowerCase() === 'path') {
-                        const x = parseInt(pixel.getAttribute('data-x'));
-                        const y = parseInt(pixel.getAttribute('data-y'));
-                        updatePixelPath(pixel, x, y);
-                        updatePixelFilter(pixel);
-                    }
-                });
-            });
-        }
-
-        function updateAllPixelPositions() {
-            layers.forEach(layer => {
-                Array.from(layer.svg.children).forEach(pixel => {
-                    if (pixel.tagName.toLowerCase() === 'path') {
                         const gridX = parseInt(pixel.getAttribute('data-x'));
                         const gridY = parseInt(pixel.getAttribute('data-y'));
-                        const screenPos = gridToScreenCoordinates(gridX, gridY);
-                        updatePixelPath(pixel, screenPos.x, screenPos.y);
+                        updatePixelPath(pixel, gridX, gridY);
                     }
                 });
             });
         }
-
+        
         // Modify drawPixelAtPosition to use paths instead of rectangles
         function drawPixelAtPosition(position) {
             if (!position || !activeLayer) return;
@@ -831,8 +817,7 @@
                     hasDrawnPixel = true;
                 }
             } else if (currentColor) {
-                const screenPos = gridToScreenCoordinates(x, y);
-                const newPixel = createPixelPath(screenPos.x, screenPos.y, currentColor);
+                const newPixel = createPixelPath(x, y, currentColor);
                 newPixel.setAttribute("data-x", x);
                 newPixel.setAttribute("data-y", y);
                 activeLayer.appendChild(newPixel);
@@ -846,15 +831,7 @@
         bendSlider.addEventListener('input', (e) => {
             bendAmount = parseFloat(e.target.value);
             bendValue.textContent = bendAmount.toFixed(1);
-            
-            // Update all existing pixels
-            layers.forEach(layer => {
-                Array.from(layer.svg.children).forEach(pixel => {
-                    const x = parseInt(pixel.getAttribute('data-x'));
-                    const y = parseInt(pixel.getAttribute('data-y'));
-                    updatePixelPath(pixel, x, y);
-                });
-            });
+            updateAllPixels();
         });
 
         function updateGridPosition() {
@@ -891,7 +868,7 @@
                 lastPanX = e.clientX;
                 lastPanY = e.clientY;
                 
-                updateAllPixelPositions();
+                updateAllPixels()
                 updateGridPosition();
                 return;
             }
@@ -1002,7 +979,7 @@
                     viewportOffsetX -= deltaX;
                     viewportOffsetY -= deltaY;
                     
-                    updateAllPixelPositions();
+                    updateAllPixels()
                     updateGridPosition();
                 }
                 
@@ -1219,7 +1196,7 @@
                 svgCanvasContainer.appendChild(layer.svg);
             });
             
-            updateAllPixelPositions();
+            updateAllPixels()
             updateGridPosition();
             
             const visibleLayer = layers.find(l => l.visible);
