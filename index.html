@@ -292,6 +292,11 @@
 
     <script>
         // Global variables
+        let viewportOffsetX = 0;
+        let viewportOffsetY = 0;
+        let isPanning = false;
+        let lastPanX = 0;
+        let lastPanY = 0;
         let gridSize = 20;
         let currentColor = "#000000";
         let isDrawing = false;
@@ -370,6 +375,23 @@
                 }
                 return name;
             }
+        }
+
+        // Convert screen coordinates to grid coordinates
+        function screenToGridCoordinates(screenX, screenY) {
+            const rect = activeLayer.getBoundingClientRect();
+            return {
+                x: Math.floor((screenX - rect.left + viewportOffsetX) / gridSize) * gridSize,
+                y: Math.floor((screenY - rect.top + viewportOffsetY) / gridSize) * gridSize
+            };
+        }
+
+        // Convert grid coordinates to screen coordinates
+        function gridToScreenCoordinates(gridX, gridY) {
+            return {
+                x: gridX - viewportOffsetX,
+                y: gridY - viewportOffsetY
+            };
         }
 
         // Initialize color palette
@@ -637,10 +659,7 @@
             
             const touch = e.touches[0];
             const rect = activeLayer.getBoundingClientRect();
-            return {
-                x: Math.floor((touch.clientX - rect.left) / gridSize) * gridSize,
-                y: Math.floor((touch.clientY - rect.top) / gridSize) * gridSize
-            };
+            return screenToGridCoordinates(touch.clientX, touch.clientY);
         }
 
         function updateFilters(svg) {
@@ -760,22 +779,34 @@
             });
         }
 
+        function updateAllPixelPositions() {
+            layers.forEach(layer => {
+                Array.from(layer.svg.children).forEach(pixel => {
+                    if (pixel.tagName.toLowerCase() === 'path') {
+                        const gridX = parseInt(pixel.getAttribute('data-x'));
+                        const gridY = parseInt(pixel.getAttribute('data-y'));
+                        const screenPos = gridToScreenCoordinates(gridX, gridY);
+                        updatePixelPath(pixel, screenPos.x, screenPos.y);
+                    }
+                });
+            });
+        }
 
         // Modify drawPixelAtPosition to use paths instead of rectangles
         function drawPixelAtPosition(position) {
             if (!position || !activeLayer) return;
-
+            
             const { x, y } = position;
-
+            
             if (lastDrawnPixel && lastDrawnPixel.x === x && lastDrawnPixel.y === y) {
                 return;
             }
-
-            const existingPixel = Array.from(activeLayer.children).find((element) => {
-                return element.getAttribute("data-x") === x.toString() && 
-                       element.getAttribute("data-y") === y.toString();
+            
+            const existingPixel = Array.from(activeLayer.children).find(element => {
+                return parseInt(element.getAttribute("data-x")) === x && 
+                    parseInt(element.getAttribute("data-y")) === y;
             });
-
+            
             if (existingPixel) {
                 if (currentColor) {
                     if (existingPixel.getAttribute("fill") !== currentColor) {
@@ -787,13 +818,14 @@
                     hasDrawnPixel = true;
                 }
             } else if (currentColor) {
-                const newPixel = createPixelPath(x, y, currentColor);
+                const screenPos = gridToScreenCoordinates(x, y);
+                const newPixel = createPixelPath(screenPos.x, screenPos.y, currentColor);
                 newPixel.setAttribute("data-x", x);
                 newPixel.setAttribute("data-y", y);
                 activeLayer.appendChild(newPixel);
                 hasDrawnPixel = true;
             }
-
+            
             lastDrawnPixel = { x, y };
         }
 
@@ -812,16 +844,37 @@
             });
         });
 
-        // Modified drawPixel function for mouse events
         function drawPixel(e) {
             if (!activeLayer) return;
-
-            const rect = activeLayer.getBoundingClientRect();
-            const position = {
-                x: Math.floor((e.clientX - rect.left) / gridSize) * gridSize,
-                y: Math.floor((e.clientY - rect.top) / gridSize) * gridSize
-            };
-            drawPixelAtPosition(position);
+            
+            // Handle panning with ctrl + left click
+            if (e.ctrlKey && e.buttons === 1) {
+                if (!isPanning) {
+                    isPanning = true;
+                    lastPanX = e.clientX;
+                    lastPanY = e.clientY;
+                    return;
+                }
+                
+                const deltaX = e.clientX - lastPanX;
+                const deltaY = e.clientY - lastPanY;
+                
+                viewportOffsetX -= deltaX;
+                viewportOffsetY -= deltaY;
+                
+                lastPanX = e.clientX;
+                lastPanY = e.clientY;
+                
+                // Update all pixels positions in all layers
+                updateAllPixelPositions();
+                return;
+            }
+            
+            // Normal drawing behavior
+            if (isDrawing) {
+                const gridPos = screenToGridCoordinates(e.clientX, e.clientY);
+                drawPixelAtPosition(gridPos);
+            }
         }
 
         // Event listeners
@@ -896,6 +949,7 @@
                 saveState();
             }
             isDrawing = false;
+            isPanning = false;
             lastDrawnPixel = null;
         });
 
@@ -904,6 +958,7 @@
                 saveState();
             }
             isDrawing = false;
+            isPanning = false;
             lastDrawnPixel = null;
         });
 
@@ -1023,16 +1078,16 @@
             reader.readAsText(file);
         });
 
-        // Save and load functionality
         function saveState() {
             if (isUndoRedoAction) {
                 isUndoRedoAction = false;
                 return;
             }
 
-            // Create a state object containing all layer information and nextLayerId
             const state = {
                 nextLayerId: nextLayerId,
+                viewportOffsetX: viewportOffsetX,
+                viewportOffsetY: viewportOffsetY,
                 layers: layers.map(layer => ({
                     id: layer.id,
                     name: layer.name,
@@ -1041,7 +1096,6 @@
                 }))
             };
 
-            // Remove all states after current index
             history = history.slice(0, currentHistoryIndex + 1);
             history.push(JSON.stringify(state));
             
@@ -1053,22 +1107,19 @@
             updateUndoRedoButtons();
         }
 
-       function loadState(stateJson) {
+        function loadState(stateJson) {
             const state = JSON.parse(stateJson);
-            
-            // Restore nextLayerId from state
             nextLayerId = state.nextLayerId;
+            viewportOffsetX = state.viewportOffsetX || 0;
+            viewportOffsetY = state.viewportOffsetY || 0;
             
-            // Clear existing layers
             while (svgCanvasContainer.firstChild) {
                 svgCanvasContainer.removeChild(svgCanvasContainer.firstChild);
             }
             layers = [];
-
-            // Recreate layers from state
+            
             state.layers.forEach(layerState => {
                 const layer = new Layer();
-                // Override the generated ID and name with the saved ones
                 layer.id = layerState.id;
                 layer.name = layerState.name;
                 layer.visible = layerState.visible;
@@ -1077,13 +1128,14 @@
                 layers.push(layer);
                 svgCanvasContainer.appendChild(layer.svg);
             });
-
-            // Set active layer to the first visible layer
+            
+            updateAllPixelPositions();
+            
             const visibleLayer = layers.find(l => l.visible);
             if (visibleLayer) {
                 setActiveLayer(visibleLayer.id);
             }
-
+            
             updateAddLayerButton();
             renderLayerPanel();
         }
