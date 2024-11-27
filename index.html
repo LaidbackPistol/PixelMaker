@@ -5,7 +5,7 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>SVG Pixel Art Tool with Layers</title>
     <style>
- body {
+        body {
             display: flex;
             flex-direction: column;
             align-items: center;
@@ -107,11 +107,20 @@
             left: 0;
             width: 100%;
             height: 100%;
-            background-image: linear-gradient(to right, #cccccc05 1px, transparent 1px),
-                              linear-gradient(to bottom, #cccccc05 1px, transparent 1px);
-            background-size: 20px 20px;
             pointer-events: none;
-            touch-action: none; /* Prevent scrolling while drawing */
+            touch-action: none;
+        }
+
+        #svgCanvasContainer::after {
+            content: "";
+            position: absolute;
+            top: 0;
+            left: 0;
+            right: 0;
+            bottom: 0;
+            pointer-events: none;
+            border: 0px solid rgba(36, 36, 36, 0.5);
+            box-shadow: inset 0 0 20px 20px rgb(36, 36, 36);
         }
 
         .svg-layer {
@@ -844,10 +853,23 @@
             });
         });
 
+        function updateGridPosition() {
+            const container = document.getElementById('svgCanvasContainer');
+            const xOffset = -viewportOffsetX % gridSize;
+            const yOffset = -viewportOffsetY % gridSize;
+            const gridColor = "#cccccc05";
+            
+            container.style.backgroundImage = `
+                linear-gradient(to right, ${gridColor} 1px, transparent 1px),
+                linear-gradient(to bottom, ${gridColor} 1px, transparent 1px)
+            `;
+            container.style.backgroundPosition = `${xOffset}px ${yOffset}px`;
+            container.style.backgroundSize = `${gridSize}px ${gridSize}px`;
+        }
+
         function drawPixel(e) {
             if (!activeLayer) return;
             
-            // Handle panning with ctrl + left click
             if (e.ctrlKey && e.buttons === 1) {
                 if (!isPanning) {
                     isPanning = true;
@@ -865,8 +887,8 @@
                 lastPanX = e.clientX;
                 lastPanY = e.clientY;
                 
-                // Update all pixels positions in all layers
                 updateAllPixelPositions();
+                updateGridPosition();
                 return;
             }
             
@@ -1154,6 +1176,7 @@
             });
             
             updateAllPixelPositions();
+            updateGridPosition();
             
             const visibleLayer = layers.find(l => l.visible);
             if (visibleLayer) {
@@ -1203,7 +1226,7 @@
         function initializeApp() {
             initializePalette();
             initializeLayers();
-            // Save initial state with nextLayerId
+            updateGridPosition();
             saveState();
         }
 
