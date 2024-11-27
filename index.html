@@ -880,31 +880,6 @@
         // Event listeners
         addLayerButton.addEventListener('click', createLayer);
 
-        document.getElementById("exportSVG").addEventListener("click", () => {
-            const exportSvg = document.createElementNS("http://www.w3.org/2000/svg", "svg");
-            exportSvg.setAttribute("width", "500");
-            exportSvg.setAttribute("height", "500");
-
-            layers.forEach(layer => {
-                if (layer.visible) {
-                    Array.from(layer.svg.children).forEach(child => {
-                        exportSvg.appendChild(child.cloneNode(true));
-                    });
-                }
-            });
-
-            const serializer = new XMLSerializer();
-            const svgBlob = new Blob([serializer.serializeToString(exportSvg)], { type: "image/svg+xml" });
-            const url = URL.createObjectURL(svgBlob);
-
-            const link = document.createElement("a");
-            link.href = url;
-            link.download = "pixel-art.svg";
-            link.click();
-
-            URL.revokeObjectURL(url);
-        });
-
         // Mouse event listeners
         document.addEventListener('mousedown', (e) => {
             if (e.target.closest('#svgCanvasContainer')) {
@@ -1077,6 +1052,55 @@
             };
             reader.readAsText(file);
         });
+
+        function exportSVG() {
+            let minX = Infinity;
+            let minY = Infinity;
+            let maxX = -Infinity;
+            let maxY = -Infinity;
+
+            // Find boundaries of all visible pixels
+            layers.forEach(layer => {
+                if (layer.visible) {
+                    Array.from(layer.svg.children).forEach(pixel => {
+                        const x = parseInt(pixel.getAttribute('data-x'));
+                        const y = parseInt(pixel.getAttribute('data-y'));
+                        minX = Math.min(minX, x);
+                        minY = Math.min(minY, y);
+                        maxX = Math.max(maxX, x + gridSize);
+                        maxY = Math.max(maxY, y + gridSize);
+                    });
+                }
+            });
+
+            // Create export SVG with calculated size
+            const exportSvg = document.createElementNS("http://www.w3.org/2000/svg", "svg");
+            exportSvg.setAttribute("width", maxX - minX);
+            exportSvg.setAttribute("height", maxY - minY);
+            exportSvg.setAttribute("viewBox", `${minX} ${minY} ${maxX - minX} ${maxY - minY}`);
+
+            layers.forEach(layer => {
+                if (layer.visible) {
+                    Array.from(layer.svg.children).forEach(child => {
+                        exportSvg.appendChild(child.cloneNode(true));
+                    });
+                }
+            });
+
+            const serializer = new XMLSerializer();
+            const svgBlob = new Blob([serializer.serializeToString(exportSvg)], { type: "image/svg+xml" });
+            const url = URL.createObjectURL(svgBlob);
+
+            const link = document.createElement("a");
+            link.href = url;
+            link.download = "pixel-art.svg";
+            link.click();
+
+            URL.revokeObjectURL(url);
+        }
+
+        // Update the event listener
+        document.getElementById("exportSVG").addEventListener("click", exportSVG);
 
         function saveState() {
             if (isUndoRedoAction) {
