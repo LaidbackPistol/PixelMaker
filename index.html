@@ -210,6 +210,26 @@
             width: 100%;
             margin-top: 5px;
         }
+
+        #bendControls {
+            width: 500px;
+            margin: 10px 0;
+            padding: 10px;
+            background-color: #333;
+            border-radius: 4px;
+            display: flex;
+            align-items: center;
+            gap: 10px;
+        }
+
+        #bendSlider {
+            flex-grow: 1;
+        }
+
+        #bendValue {
+            min-width: 50px;
+            text-align: right;
+        }
     </style>
 </head>
 <body>
@@ -234,6 +254,12 @@
         <input type="file" id="importInput" accept=".svg" />
     </div>
 
+    <div id="bendControls">
+        <label for="bendSlider">Edge Bend:</label>
+        <input type="range" id="bendSlider" min="-5" max="5" value="0" step="0.1">
+        <span id="bendValue">0</span>
+    </div>
+
     <div id="svgCanvasContainer">
         <!-- SVG layers will be dynamically added here -->
     </div>
@@ -251,7 +277,8 @@
         let selectedPaletteIndex = 0;
         let lastDrawnPixel = null;
         let hasDrawnPixel = false;
-        
+        let bendAmount = 0;
+
         // History management
         const MAX_HISTORY = 30;
         let history = [];
@@ -290,6 +317,9 @@
         const layerList = document.getElementById("layerList");
         const addLayerButton = document.getElementById("addLayerButton");
         const svgCanvasContainer = document.getElementById("svgCanvasContainer");
+        // Get bend control elements
+        const bendSlider = document.getElementById('bendSlider');
+        const bendValue = document.getElementById('bendValue');
 
         // Updated Layer class
         class Layer {
@@ -587,6 +617,47 @@
                 y: Math.floor((touch.clientY - rect.top) / gridSize) * gridSize
             };
         }
+        function createPixelPath(x, y, color) {
+            const path = document.createElementNS("http://www.w3.org/2000/svg", "path");
+            path.setAttribute("fill", color);
+            updatePixelPath(path, x, y);
+            return path;
+        }
+
+        function updatePixelPath(path, x, y) {
+            const size = gridSize;
+            const bend = bendAmount;
+            
+            // Calculate control points for the curves
+            // For outer curves (positive bend), control points move outward
+            // For inner curves (negative bend), control points move inward
+            const cp = Math.abs(bend);
+            const sign = Math.sign(bend);
+            
+            // Start from top-left corner and go clockwise
+            let d = [
+                // Move to top-left corner
+                `M ${x} ${y}`,
+                
+                // Top edge (curved)
+                `C ${x + cp} ${y - sign * cp}, ${x + size - cp} ${y - sign * cp}, ${x + size} ${y}`,
+                
+                // Right edge (curved)
+                `C ${x + size + sign * cp} ${y + cp}, ${x + size + sign * cp} ${y + size - cp}, ${x + size} ${y + size}`,
+                
+                // Bottom edge (curved)
+                `C ${x + size - cp} ${y + size + sign * cp}, ${x + cp} ${y + size + sign * cp}, ${x} ${y + size}`,
+                
+                // Left edge (curved)
+                `C ${x - sign * cp} ${y + size - cp}, ${x - sign * cp} ${y + cp}, ${x} ${y}`,
+                
+                'Z' // Close the path
+            ].join(' ');
+            
+            path.setAttribute('d', d);
+        }
+
+        // Modify drawPixelAtPosition to use paths instead of rectangles
         function drawPixelAtPosition(position) {
             if (!position || !activeLayer) return;
 
@@ -596,8 +667,9 @@
                 return;
             }
 
-            const existingPixel = Array.from(activeLayer.children).find((rect) => {
-                return +rect.getAttribute("x") === x && +rect.getAttribute("y") === y;
+            const existingPixel = Array.from(activeLayer.children).find((element) => {
+                return element.getAttribute("data-x") === x.toString() && 
+                       element.getAttribute("data-y") === y.toString();
             });
 
             if (existingPixel) {
@@ -611,18 +683,30 @@
                     hasDrawnPixel = true;
                 }
             } else if (currentColor) {
-                const newPixel = document.createElementNS("http://www.w3.org/2000/svg", "rect");
-                newPixel.setAttribute("x", x);
-                newPixel.setAttribute("y", y);
-                newPixel.setAttribute("width", gridSize);
-                newPixel.setAttribute("height", gridSize);
-                newPixel.setAttribute("fill", currentColor);
+                const newPixel = createPixelPath(x, y, currentColor);
+                newPixel.setAttribute("data-x", x);
+                newPixel.setAttribute("data-y", y);
                 activeLayer.appendChild(newPixel);
                 hasDrawnPixel = true;
             }
 
             lastDrawnPixel = { x, y };
         }
+
+        // Add bend slider event listener
+        bendSlider.addEventListener('input', (e) => {
+            bendAmount = parseInt(e.target.value);
+            bendValue.textContent = bendAmount;
+            
+            // Update all existing pixels
+            layers.forEach(layer => {
+                Array.from(layer.svg.children).forEach(pixel => {
+                    const x = parseInt(pixel.getAttribute('data-x'));
+                    const y = parseInt(pixel.getAttribute('data-y'));
+                    updatePixelPath(pixel, x, y);
+                });
+            });
+        });
 
         // Modified drawPixel function for mouse events
         function drawPixel(e) {
@@ -781,63 +865,57 @@
             importInput.click();
         });
 
+        function importSVG(svgContent) {
+            try {
+                const parser = new DOMParser();
+                const svgDoc = parser.parseFromString(svgContent, 'image/svg+xml');
+                
+                // Get all rectangles and paths from the imported SVG
+                const elements = [...svgDoc.getElementsByTagName('rect'), ...svgDoc.getElementsByTagName('path')];
+                
+                const importLayer = createLayer();
+                if (!importLayer) {
+                    alert('Maximum layer limit reached. Delete a layer before importing.');
+                    return;
+                }
+
+                elements
+                    .sort((a, b) => {
+                        const aY = parseFloat(a.getAttribute('y') || a.getAttribute('data-y'));
+                        const bY = parseFloat(b.getAttribute('y') || b.getAttribute('data-y'));
+                        const yDiff = aY - bY;
+                        return yDiff || parseFloat(a.getAttribute('x') || a.getAttribute('data-x')) - 
+                                      parseFloat(b.getAttribute('x') || b.getAttribute('data-x'));
+                    })
+                    .forEach(element => {
+                        const x = Math.floor(parseFloat(element.getAttribute('x') || element.getAttribute('data-x')) / gridSize) * gridSize;
+                        const y = Math.floor(parseFloat(element.getAttribute('y') || element.getAttribute('data-y')) / gridSize) * gridSize;
+                        const fill = element.getAttribute('fill');
+                        
+                        const newPixel = createPixelPath(x, y, fill);
+                        newPixel.setAttribute("data-x", x);
+                        newPixel.setAttribute("data-y", y);
+                        importLayer.svg.appendChild(newPixel);
+                    });
+
+                setActiveLayer(importLayer.id);
+                saveState();
+            } catch (error) {
+                console.error('Error importing SVG:', error);
+                alert('Error importing SVG. Please make sure the file is a valid SVG created with this tool.');
+            }
+        }
+
+        // Update the import event listener
         importInput.addEventListener('change', (e) => {
             const file = e.target.files[0];
             if (!file) return;
 
             const reader = new FileReader();
             reader.onload = (e) => {
-                try {
-                    // Parse the SVG content
-                    const parser = new DOMParser();
-                    const svgDoc = parser.parseFromString(e.target.result, 'image/svg+xml');
-                    
-                    // Get all rectangles from the imported SVG
-                    const rects = svgDoc.getElementsByTagName('rect');
-                    
-                    // Create a new layer for the imported content
-                    const importLayer = createLayer();
-                    if (!importLayer) {
-                        alert('Maximum layer limit reached. Delete a layer before importing.');
-                        return;
-                    }
-
-                    // Convert NodeList to Array and sort by position for better organization
-                    Array.from(rects)
-                        .sort((a, b) => {
-                            const yDiff = parseFloat(a.getAttribute('y')) - parseFloat(b.getAttribute('y'));
-                            return yDiff || parseFloat(a.getAttribute('x')) - parseFloat(b.getAttribute('x'));
-                        })
-                        .forEach(rect => {
-                            // Create new rectangle in our format
-                            const newRect = document.createElementNS("http://www.w3.org/2000/svg", "rect");
-                            
-                            // Copy attributes
-                            const x = Math.floor(parseFloat(rect.getAttribute('x')) / gridSize) * gridSize;
-                            const y = Math.floor(parseFloat(rect.getAttribute('y')) / gridSize) * gridSize;
-                            
-                            newRect.setAttribute('x', x);
-                            newRect.setAttribute('y', y);
-                            newRect.setAttribute('width', gridSize);
-                            newRect.setAttribute('height', gridSize);
-                            newRect.setAttribute('fill', rect.getAttribute('fill'));
-                            
-                            importLayer.svg.appendChild(newRect);
-                        });
-
-                    // Set the imported layer as active
-                    setActiveLayer(importLayer.id);
-                    saveState();
-                    
-                    // Reset the input
-                    e.target.value = '';
-                    
-                } catch (error) {
-                    console.error('Error importing SVG:', error);
-                    alert('Error importing SVG. Please make sure the file is a valid SVG created with this tool.');
-                }
+                importSVG(e.target.result);
+                importInput.value = '';
             };
-            
             reader.readAsText(file);
         });
 
