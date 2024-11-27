@@ -49,6 +49,29 @@
             color: #fff;
         }
 
+        .tool-group {
+            display: flex;
+            gap: 5px;
+            margin-right: 10px;
+        }
+
+        .tool-button {
+            background-color: #444;
+            color: white;
+            border: none;
+            padding: 5px 10px;
+            cursor: pointer;
+            border-radius: 3px;
+        }
+
+        .tool-button.selected {
+            background-color: #666;
+        }
+
+        .selected-pixel {
+            outline: 1px solid rgba(255, 255, 255, 0.5);
+        }
+
         #toolbar {
             margin-bottom: 10px;
             display: flex;
@@ -98,6 +121,7 @@
             position: relative;
             width: 500px;
             height: 500px;
+            overflow: hidden; /* Add this to contain the selection overlay */
         }
 
         #svgCanvasContainer::before {
@@ -127,6 +151,18 @@
             position: absolute;
             top: 0;
             left: 0;
+            width: 100%;
+            height: 100%;
+        }
+
+        #selectionOverlay {
+            position: absolute;
+            background-color: rgba(255, 255, 255, 0.2);
+            border: 1px dashed white;
+            pointer-events: none;
+            z-index: 1000;
+            box-sizing: border-box;
+            transform-origin: top left;
         }
 
         #importInput, #paletteColorInput, #importPaletteInput {
@@ -257,6 +293,16 @@
         <button id="importPaletteButton">Import Palette</button>
     </div>
 
+    <div id="toolbar">
+        <div class="tool-group">
+            <button id="pencilTool" class="tool-button selected">✏️ Pencil</button>
+            <button id="selectTool" class="tool-button">◻️ Select</button>
+        </div>
+        <button id="exportSVG">Export SVG</button>
+        <button id="importButton">Import SVG</button>
+        <input type="file" id="importInput" accept=".svg" />
+    </div>
+
     <div class="button-group">
         <button id="undoButton" disabled>Undo</button>
         <button id="redoButton" disabled>Redo</button>
@@ -292,6 +338,7 @@
 
     <div id="svgCanvasContainer">
         <!-- SVG layers will be dynamically added here -->
+        <div id="selectionOverlay" style="display: none; position: absolute; border: 1px dashed white; pointer-events: none;"></div>
     </div>
 
     <div id="layerPanel">
@@ -319,6 +366,14 @@
         let isPanningMobile = false;
         let lastTouchX = 0;
         let lastTouchY = 0;
+        let currentTool = 'pencil';
+        let isSelecting = false;
+        let selectionStart = null;
+        let selectionEnd = null;
+        let selectedPixels = new Set();
+        let isDraggingSelection = false;
+        let dragOffset = { x: 0, y: 0 };
+        let originalPositions = new Map();
 
         // History management
         const MAX_HISTORY = 30;
@@ -363,6 +418,10 @@
         const blurYSlider = document.getElementById('blurYSlider');
         const blurXValue = document.getElementById('blurXValue');
         const blurYValue = document.getElementById('blurYValue');
+        // Add tool selection handlers
+        const pencilToolBtn = document.getElementById('pencilTool');
+        const selectToolBtn = document.getElementById('selectTool');
+        const selectionOverlay = document.getElementById('selectionOverlay');
 
         // Updated Layer class
         class Layer {
@@ -747,6 +806,85 @@
             path.setAttribute('d', d);
         }
 
+        function updateSelectionOverlay() {
+            if (!selectionStart || !selectionEnd) return;
+
+            // Get the container's position
+            const containerRect = svgCanvasContainer.getBoundingClientRect();
+            
+            // Calculate relative positions within the container
+            const startX = selectionStart.x;
+            const startY = selectionStart.y;
+            const endX = selectionEnd.x;
+            const endY = selectionEnd.y;
+            
+            // Convert to grid coordinates
+            const gridStart = screenToGridCoordinates(startX + containerRect.left, startY + containerRect.top);
+            const gridEnd = screenToGridCoordinates(endX + containerRect.left, endY + containerRect.top);
+            
+            // Convert back to screen coordinates
+            const screenStart = gridToScreenCoordinates(gridStart.x, gridStart.y);
+            const screenEnd = gridToScreenCoordinates(gridEnd.x + gridSize, gridEnd.y + gridSize);
+            
+            // Position the overlay relative to the container
+            selectionOverlay.style.position = 'absolute';
+            selectionOverlay.style.left = `${Math.min(screenStart.x, screenEnd.x)}px`;
+            selectionOverlay.style.top = `${Math.min(screenStart.y, screenEnd.y)}px`;
+            selectionOverlay.style.width = `${Math.abs(screenEnd.x - screenStart.x)}px`;
+            selectionOverlay.style.height = `${Math.abs(screenEnd.y - screenStart.y)}px`;
+        }
+
+        function updateSelection() {
+            if (!activeLayer || !selectionStart || !selectionEnd) return;
+
+            const rect = svgCanvasContainer.getBoundingClientRect();
+            
+            // Convert screen coordinates to grid coordinates
+            const gridStart = screenToGridCoordinates(selectionStart.x + rect.left, selectionStart.y + rect.top);
+            const gridEnd = screenToGridCoordinates(selectionEnd.x + rect.left, selectionEnd.y + rect.top);
+            
+            // Calculate grid bounds
+            const minX = Math.min(gridStart.x, gridEnd.x);
+            const maxX = Math.max(gridStart.x, gridEnd.x);
+            const minY = Math.min(gridStart.y, gridEnd.y);
+            const maxY = Math.max(gridStart.y, gridEnd.y);
+
+            selectedPixels.clear();
+            Array.from(activeLayer.children).forEach(pixel => {
+                if (pixel.tagName.toLowerCase() === 'path') {
+                    const x = parseInt(pixel.getAttribute('data-x'));
+                    const y = parseInt(pixel.getAttribute('data-y'));
+
+                    if (x >= minX && x <= maxX && y >= minY && y <= maxY) {
+                        selectedPixels.add(pixel);
+                        pixel.classList.add('selected-pixel');
+                    } else {
+                        pixel.classList.remove('selected-pixel');
+                    }
+                }
+            });
+        }
+
+        function clearSelection() {
+            selectedPixels.forEach(pixel => {
+                pixel.classList.remove('selected-pixel');
+            });
+            selectedPixels.clear();
+            originalPositions.clear();
+            selectionStart = null;
+            selectionEnd = null;
+            selectionOverlay.style.display = 'none';
+        }
+
+        function isPixelInSelection(clientX, clientY) {
+            const gridPos = screenToGridCoordinates(clientX, clientY);
+            return Array.from(selectedPixels).some(pixel => {
+                const pixelX = parseInt(pixel.getAttribute('data-x'));
+                const pixelY = parseInt(pixel.getAttribute('data-y'));
+                return pixelX === gridPos.x && pixelY === gridPos.y;
+            });
+        }
+
         bendSlider.addEventListener('input', (e) => {
             bendAmount = parseFloat(e.target.value);
             bendValue.textContent = bendAmount.toFixed(1);
@@ -790,7 +928,7 @@
                 });
             });
         }
-        
+
         // Modify drawPixelAtPosition to use paths instead of rectangles
         function drawPixelAtPosition(position) {
             if (!position || !activeLayer) return;
@@ -885,52 +1023,122 @@
 
         // Mouse event listeners
         document.addEventListener('mousedown', (e) => {
-            if (e.target.closest('#svgCanvasContainer')) {
-                e.preventDefault(); // Prevent default right-click menu
+            if (!e.target.closest('#svgCanvasContainer')) return;
+            e.preventDefault();
+
+            if (currentTool === 'pencil') {
+                // Existing pencil tool logic
                 isDrawing = true;
                 hasDrawnPixel = false;
-                
-                // Store the original color when starting to draw
                 const originalColor = currentColor;
-                
-                // Set color to null (eraser) for right click
-                if (e.button === 2) {
-                    currentColor = null;
-                }
-                
+                if (e.button === 2) currentColor = null;
                 drawPixel(e);
-                
-                // Restore the original color after drawing
                 currentColor = originalColor;
+            } else if (currentTool === 'select') {
+                const rect = svgCanvasContainer.getBoundingClientRect();
+                if (e.button === 0) { // Left click
+                    if (selectedPixels.size > 0 && isPixelInSelection(e.clientX, e.clientY)) {
+                        // Start dragging selection
+                        isDraggingSelection = true;
+                        const gridPos = screenToGridCoordinates(e.clientX, e.clientY);
+                        dragOffset.x = gridPos.x;
+                        dragOffset.y = gridPos.y;
+                        // Store original positions
+                        originalPositions.clear();
+                        selectedPixels.forEach(pixel => {
+                            originalPositions.set(pixel, {
+                                x: parseInt(pixel.getAttribute('data-x')),
+                                y: parseInt(pixel.getAttribute('data-y'))
+                            });
+                        });
+                    } else {
+                        // Start new selection
+                        isSelecting = true;
+                        clearSelection();
+                        selectionStart = {
+                            x: e.clientX - rect.left,
+                            y: e.clientY - rect.top
+                        };
+                        selectionOverlay.style.display = 'block';
+                        updateSelectionOverlay();
+                    }
+                }
             }
         });
 
+        // Update the mousemove event handler for selection
         document.addEventListener('mousemove', (e) => {
-            if (isDrawing && e.target.closest('#svgCanvasContainer')) {
-                // Store the original color when moving
+            if (!e.target.closest('#svgCanvasContainer')) return;
+
+            if (currentTool === 'pencil' && isDrawing) {
+                // Existing pencil tool logic
                 const originalColor = currentColor;
-                
-                // Set color to null (eraser) for right click
-                if (e.buttons === 2) {
-                    currentColor = null;
-                }
-                
+                if (e.buttons === 2) currentColor = null;
                 drawPixel(e);
-                
-                // Restore the original color after drawing
                 currentColor = originalColor;
+            } else if (currentTool === 'select') {
+                if (isSelecting) {
+                    const rect = svgCanvasContainer.getBoundingClientRect();
+                    selectionEnd = {
+                        x: e.clientX - rect.left,
+                        y: e.clientY - rect.top
+                    };
+                    updateSelectionOverlay();
+                } else if (isDraggingSelection) {
+                    const currentGridPos = screenToGridCoordinates(e.clientX, e.clientY);
+                    const deltaX = currentGridPos.x - dragOffset.x;
+                    const deltaY = currentGridPos.y - dragOffset.y;
+                    
+                    selectedPixels.forEach(pixel => {
+                        const original = originalPositions.get(pixel);
+                        const newX = original.x + deltaX;
+                        const newY = original.y + deltaY;
+                        updatePixelPath(pixel, newX, newY);
+                        pixel.setAttribute('data-x', newX);
+                        pixel.setAttribute('data-y', newY);
+                    });
+                }
             }
         });
 
-        document.addEventListener('mouseup', () => {
-            if (isDrawing && hasDrawnPixel) {
-                saveState();
+        document.addEventListener('mouseup', (e) => {
+            if (currentTool === 'pencil') {
+                if (isDrawing && hasDrawnPixel) {
+                    saveState();
+                }
+                isDrawing = false;
+            } else if (currentTool === 'select') {
+                if (isSelecting) {
+                    isSelecting = false;
+                    updateSelection();
+                    selectionOverlay.style.display = 'none';
+                } else if (isDraggingSelection) {
+                    // Handle pixel replacement on drag end
+                    selectedPixels.forEach(pixel => {
+                        const x = parseInt(pixel.getAttribute('data-x'));
+                        const y = parseInt(pixel.getAttribute('data-y'));
+                        
+                        // Find any existing pixel at this position (except the current one)
+                        const existingPixel = Array.from(activeLayer.children).find(element => {
+                            if (element === pixel) return false;
+                            return parseInt(element.getAttribute("data-x")) === x && 
+                                parseInt(element.getAttribute("data-y")) === y;
+                        });
+
+                        // Remove existing pixel if found
+                        if (existingPixel) {
+                            activeLayer.removeChild(existingPixel);
+                        }
+                    });
+                    
+                    isDraggingSelection = false;
+                    saveState();
+                }
             }
-            isDrawing = false;
             isPanning = false;
             lastDrawnPixel = null;
         });
-
+        
         document.addEventListener('mouseleave', () => {
             if (isDrawing && hasDrawnPixel) {
                 saveState();
@@ -1180,6 +1388,12 @@
             viewportOffsetX = state.viewportOffsetX || 0;
             viewportOffsetY = state.viewportOffsetY || 0;
             
+            // Save reference to selection overlay before clearing
+            const selectionOverlay = document.getElementById('selectionOverlay');
+            if (selectionOverlay) {
+                selectionOverlay.remove();
+            }
+            
             while (svgCanvasContainer.firstChild) {
                 svgCanvasContainer.removeChild(svgCanvasContainer.firstChild);
             }
@@ -1196,7 +1410,12 @@
                 svgCanvasContainer.appendChild(layer.svg);
             });
             
-            updateAllPixels()
+            // Re-append selection overlay
+            if (selectionOverlay) {
+                svgCanvasContainer.appendChild(selectionOverlay);
+            }
+            
+            updateAllPixels();
             updateGridPosition();
             
             const visibleLayer = layers.find(l => l.visible);
@@ -1234,14 +1453,37 @@
 
         // Keyboard shortcuts
         document.addEventListener('keydown', (e) => {
-            if (e.ctrlKey && !e.shiftKey && e.key.toLowerCase() === 'z') {
-                e.preventDefault();
-                undoButton.click();
-            } else if ((e.ctrlKey && !e.shiftKey && e.key.toLowerCase() === 'y') || 
-                      (e.ctrlKey && e.shiftKey && e.key.toLowerCase() === 'z')) {
-                e.preventDefault();
-                redoButton.click();
+            if (currentTool === 'select' && selectedPixels.size > 0) {
+                if (e.key === 'Delete' || e.key === 'Backspace') {
+                    e.preventDefault();
+                    selectedPixels.forEach(pixel => {
+                        pixel.remove();
+                    });
+                    clearSelection();
+                    saveState();
+                } else if (e.ctrlKey && e.key.toLowerCase() === 'c') {
+                    // Copy selection to clipboard (you would need to implement clipboard handling)
+                    e.preventDefault();
+                    copySelection();
+                } else if (e.ctrlKey && e.key.toLowerCase() === 'v') {
+                    // Paste from clipboard (you would need to implement clipboard handling)
+                    e.preventDefault();
+                    pasteSelection();
+                }
             }
+        });
+
+        pencilToolBtn.addEventListener('click', () => {
+            currentTool = 'pencil';
+            pencilToolBtn.classList.add('selected');
+            selectToolBtn.classList.remove('selected');
+            clearSelection();
+        });
+
+        selectToolBtn.addEventListener('click', () => {
+            currentTool = 'select';
+            selectToolBtn.classList.add('selected');
+            pencilToolBtn.classList.remove('selected');
         });
 
         function initializeApp() {
