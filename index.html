@@ -211,24 +211,29 @@
             margin-top: 5px;
         }
 
-        #bendControls {
-            width: 500px;
-            margin: 10px 0;
-            padding: 10px;
-            background-color: #333;
-            border-radius: 4px;
+        .modifier-control {
             display: flex;
             align-items: center;
             gap: 10px;
+            margin: 5px 0;
+            padding: 5px;
+            border-radius: 3px;
         }
 
-        #bendSlider {
-            flex-grow: 1;
+        .modifier-control:hover {
+            background-color: #3a3a3a;
         }
 
-        #bendValue {
-            min-width: 50px;
-            text-align: right;
+        /* Add groups for related controls */
+        .modifier-group {
+            border-bottom: 1px solid #444;
+            margin-bottom: 8px;
+            padding-bottom: 8px;
+        }
+
+        .modifier-group:last-child {
+            border-bottom: none;
+            margin-bottom: 0;
         }
     </style>
 </head>
@@ -254,10 +259,26 @@
         <input type="file" id="importInput" accept=".svg" />
     </div>
 
-    <div id="bendControls">
-        <label for="bendSlider">Edge Bend:</label>
-        <input type="range" id="bendSlider" min="-5" max="5" value="0" step="0.1">
-        <span id="bendValue">0</span>
+    <div id="modifierControls">
+        <div class="modifier-group">
+            <div class="modifier-control">
+                <label for="bendSlider">Edge Bend:</label>
+                <input type="range" id="bendSlider" class="modifier-slider" min="-5" max="5" value="0" step="0.1">
+                <span id="bendValue" class="modifier-value">0.0</span>
+            </div>
+        </div>
+        <div class="modifier-group">
+            <div class="modifier-control">
+                <label for="blurXSlider">Blur X:</label>
+                <input type="range" id="blurXSlider" class="modifier-slider" min="0" max="20" value="0" step="0.1">
+                <span id="blurXValue" class="modifier-value">0.0</span>
+            </div>
+            <div class="modifier-control">
+                <label for="blurYSlider">Blur Y:</label>
+                <input type="range" id="blurYSlider" class="modifier-slider" min="0" max="20" value="0" step="0.1">
+                <span id="blurYValue" class="modifier-value">0.0</span>
+            </div>
+        </div>
     </div>
 
     <div id="svgCanvasContainer">
@@ -278,6 +299,8 @@
         let lastDrawnPixel = null;
         let hasDrawnPixel = false;
         let bendAmount = 0;
+        let blurXAmount = 0;
+        let blurYAmount = 0;
 
         // History management
         const MAX_HISTORY = 30;
@@ -317,9 +340,11 @@
         const layerList = document.getElementById("layerList");
         const addLayerButton = document.getElementById("addLayerButton");
         const svgCanvasContainer = document.getElementById("svgCanvasContainer");
-        // Get bend control elements
-        const bendSlider = document.getElementById('bendSlider');
-        const bendValue = document.getElementById('bendValue');
+        // Get new control elements
+        const blurXSlider = document.getElementById('blurXSlider');
+        const blurYSlider = document.getElementById('blurYSlider');
+        const blurXValue = document.getElementById('blurXValue');
+        const blurYValue = document.getElementById('blurYValue');
 
         // Updated Layer class
         class Layer {
@@ -617,6 +642,41 @@
                 y: Math.floor((touch.clientY - rect.top) / gridSize) * gridSize
             };
         }
+
+        function updateFilters(svg) {
+            const existingDefs = svg.querySelector('defs');
+            if (existingDefs) {
+                svg.removeChild(existingDefs);
+            }
+
+            const defs = document.createElementNS("http://www.w3.org/2000/svg", "defs");
+            
+            // Create main filter
+            const mainFilter = document.createElementNS("http://www.w3.org/2000/svg", "filter");
+            mainFilter.setAttribute("id", "mainEffect");
+            // Extend the filter region to prevent clipping
+            mainFilter.setAttribute("x", "-100%");
+            mainFilter.setAttribute("y", "-100%");
+            mainFilter.setAttribute("width", "300%");
+            mainFilter.setAttribute("height", "300%");
+            
+            // Add directional blur
+            const blurEffect = document.createElementNS("http://www.w3.org/2000/svg", "feGaussianBlur");
+            blurEffect.setAttribute("in", "SourceGraphic");
+            blurEffect.setAttribute("stdDeviation", `${blurXAmount} ${blurYAmount}`);
+            mainFilter.appendChild(blurEffect);
+            
+            defs.appendChild(mainFilter);
+            svg.insertBefore(defs, svg.firstChild);
+
+            // Apply filter directly to the SVG element instead of individual paths
+            if (blurXAmount > 0 || blurYAmount > 0) {
+                svg.setAttribute('filter', 'url(#mainEffect)');
+            } else {
+                svg.removeAttribute('filter');
+            }
+        }
+
         function createPixelPath(x, y, color) {
             const path = document.createElementNS("http://www.w3.org/2000/svg", "path");
             path.setAttribute("fill", color);
@@ -629,14 +689,11 @@
             const bend = bendAmount;
             
             // Calculate control points for the curves
-            // For outer curves (positive bend), control points move outward
-            // For inner curves (negative bend), control points move inward
             const cp = Math.abs(bend);
             const sign = Math.sign(bend);
             
-            // Start from top-left corner and go clockwise
+            // Create path with curved edges
             let d = [
-                // Move to top-left corner
                 `M ${x} ${y}`,
                 
                 // Top edge (curved)
@@ -651,11 +708,58 @@
                 // Left edge (curved)
                 `C ${x - sign * cp} ${y + size - cp}, ${x - sign * cp} ${y + cp}, ${x} ${y}`,
                 
-                'Z' // Close the path
+                'Z'
             ].join(' ');
             
             path.setAttribute('d', d);
         }
+
+        // Update sliders' event listeners
+        bendSlider.addEventListener('input', (e) => {
+            bendAmount = parseFloat(e.target.value);
+            bendValue.textContent = bendAmount.toFixed(1);
+            updateAllPixels();
+        });
+
+        blurXSlider.addEventListener('input', (e) => {
+            blurXAmount = parseFloat(e.target.value);
+            blurXValue.textContent = blurXAmount.toFixed(1);
+            layers.forEach(layer => {
+                updateFilters(layer.svg);
+            });
+        });
+
+        blurYSlider.addEventListener('input', (e) => {
+            blurYAmount = parseFloat(e.target.value);
+            blurYValue.textContent = blurYAmount.toFixed(1);
+            layers.forEach(layer => {
+                updateFilters(layer.svg);
+            });
+        });
+
+        // Modify create layer function to include filters
+        const originalCreateLayer = createLayer;
+        createLayer = function() {
+            const layer = originalCreateLayer();
+            if (layer) {
+                updateFilters(layer.svg);
+            }
+            return layer;
+        };
+
+        function updateAllPixels() {
+            layers.forEach(layer => {
+                Array.from(layer.svg.children).forEach(pixel => {
+                    if (pixel.tagName.toLowerCase() === 'path') {
+                        const x = parseInt(pixel.getAttribute('data-x'));
+                        const y = parseInt(pixel.getAttribute('data-y'));
+                        updatePixelPath(pixel, x, y);
+                        updatePixelFilter(pixel);
+                    }
+                });
+            });
+        }
+
 
         // Modify drawPixelAtPosition to use paths instead of rectangles
         function drawPixelAtPosition(position) {
@@ -693,10 +797,10 @@
             lastDrawnPixel = { x, y };
         }
 
-        // Add bend slider event listener
+        // Bend slider event listener
         bendSlider.addEventListener('input', (e) => {
-            bendAmount = parseInt(e.target.value);
-            bendValue.textContent = bendAmount;
+            bendAmount = parseFloat(e.target.value);
+            bendValue.textContent = bendAmount.toFixed(1);
             
             // Update all existing pixels
             layers.forEach(layer => {
