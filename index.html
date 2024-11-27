@@ -558,15 +558,39 @@
         // Mouse event listeners
         document.addEventListener('mousedown', (e) => {
             if (e.target.closest('#svgCanvasContainer')) {
+                e.preventDefault(); // Prevent default right-click menu
                 isDrawing = true;
                 hasDrawnPixel = false;
+                
+                // Store the original color when starting to draw
+                const originalColor = currentColor;
+                
+                // Set color to null (eraser) for right click
+                if (e.button === 2) {
+                    currentColor = null;
+                }
+                
                 drawPixel(e);
+                
+                // Restore the original color after drawing
+                currentColor = originalColor;
             }
         });
 
         document.addEventListener('mousemove', (e) => {
             if (isDrawing && e.target.closest('#svgCanvasContainer')) {
+                // Store the original color when moving
+                const originalColor = currentColor;
+                
+                // Set color to null (eraser) for right click
+                if (e.buttons === 2) {
+                    currentColor = null;
+                }
+                
                 drawPixel(e);
+                
+                // Restore the original color after drawing
+                currentColor = originalColor;
             }
         });
 
@@ -587,6 +611,11 @@
         });
 
         // Touch event listeners
+        svgCanvasContainer.addEventListener('contextmenu', (e) => {
+            e.preventDefault();
+            return false;
+        });
+
         svgCanvasContainer.addEventListener('touchstart', (e) => {
             e.preventDefault(); // Prevent scrolling
             isDrawing = true;
