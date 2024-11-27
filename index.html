@@ -315,6 +315,10 @@
         let bendAmount = 0;
         let blurXAmount = 0;
         let blurYAmount = 0;
+        let lastTouchDistance = 0;
+        let isPanningMobile = false;
+        let lastTouchX = 0;
+        let lastTouchY = 0;
 
         // History management
         const MAX_HISTORY = 30;
@@ -966,36 +970,76 @@
         });
 
         svgCanvasContainer.addEventListener('touchstart', (e) => {
-            e.preventDefault(); // Prevent scrolling
-            isDrawing = true;
-            hasDrawnPixel = false;
-            const position = getTouchPosition(e);
-            drawPixelAtPosition(position);
+            e.preventDefault();
+            
+            // Two-finger pan
+                if (e.touches.length === 2) {
+                    isPanningMobile = true;
+                    lastTouchX = (e.touches[0].clientX + e.touches[1].clientX) / 2;
+                    lastTouchY = (e.touches[0].clientY + e.touches[1].clientY) / 2;
+                    return;
+                }
+                
+                // Single finger draw
+                isDrawing = true;
+                hasDrawnPixel = false;
+                const position = getTouchPosition(e);
+                drawPixelAtPosition(position);
         }, { passive: false });
 
         svgCanvasContainer.addEventListener('touchmove', (e) => {
-            e.preventDefault(); // Prevent scrolling
+            e.preventDefault();
+            
+            // Two-finger pan
+            if (e.touches.length === 2) {
+                const currentTouchX = (e.touches[0].clientX + e.touches[1].clientX) / 2;
+                const currentTouchY = (e.touches[0].clientY + e.touches[1].clientY) / 2;
+                
+                if (isPanningMobile) {
+                    const deltaX = currentTouchX - lastTouchX;
+                    const deltaY = currentTouchY - lastTouchY;
+                    
+                    viewportOffsetX -= deltaX;
+                    viewportOffsetY -= deltaY;
+                    
+                    updateAllPixelPositions();
+                    updateGridPosition();
+                }
+                
+                lastTouchX = currentTouchX;
+                lastTouchY = currentTouchY;
+                return;
+            }
+            
+            // Single finger draw
             if (isDrawing) {
                 const position = getTouchPosition(e);
                 drawPixelAtPosition(position);
             }
         }, { passive: false });
 
+
         svgCanvasContainer.addEventListener('touchend', (e) => {
-            e.preventDefault(); // Prevent any default touch behavior
+            e.preventDefault();
+            
             if (isDrawing && hasDrawnPixel) {
                 saveState();
             }
+            
             isDrawing = false;
+            isPanningMobile = false;
             lastDrawnPixel = null;
         }, { passive: false });
 
         svgCanvasContainer.addEventListener('touchcancel', (e) => {
             e.preventDefault();
+            
             if (isDrawing && hasDrawnPixel) {
                 saveState();
             }
+            
             isDrawing = false;
+            isPanningMobile = false;
             lastDrawnPixel = null;
         }, { passive: false });
 
