@@ -316,20 +316,14 @@
             <button id="pencilTool" class="tool-button selected">✏️ Pencil</button>
             <button id="selectTool" class="tool-button">◻️ Select</button>
         </div>
-        <button id="exportSVG">Export SVG</button>
-        <button id="importButton">Import SVG</button>
+        <button id="exportSVGBtn">Export SVG</button>
+        <button id="importSVGBtn">Import SVG</button>
         <input type="file" id="importInput" accept=".svg" />
     </div>
 
     <div class="button-group">
         <button id="undoButton" disabled>Undo</button>
         <button id="redoButton" disabled>Redo</button>
-    </div>
-
-    <div id="toolbar">
-        <button id="exportSVG">Export SVG</button>
-        <button id="importButton">Import SVG</button>
-        <input type="file" id="importInput" accept=".svg" />
     </div>
 
     <div id="modifierControls">
@@ -393,6 +387,8 @@
         let dragOffset = { x: 0, y: 0 };
         let originalPositions = new Map();
         let panningCursor = null;
+        let clipboardData = null;
+        let clipboardOffset = null;
 
         // History management
         const MAX_HISTORY = 30;
@@ -426,7 +422,6 @@
         const importPaletteButton = document.getElementById("importPaletteButton");
         const undoButton = document.getElementById("undoButton");
         const redoButton = document.getElementById("redoButton");
-        const importButton = document.getElementById("importButton");
         const importInput = document.getElementById("importInput");
         const layerPanel = document.getElementById("layerPanel");
         const layerList = document.getElementById("layerList");
@@ -1384,11 +1379,6 @@
             importPaletteInput.click();
         });
 
-        // Import functionality
-        importButton.addEventListener('click', () => {
-            importInput.click();
-        });
-
         function importSVG(svgContent) {
             try {
                 const parser = new DOMParser();
@@ -1434,11 +1424,11 @@
         importInput.addEventListener('change', (e) => {
             const file = e.target.files[0];
             if (!file) return;
-
+            
             const reader = new FileReader();
-            reader.onload = (e) => {
-                importSVG(e.target.result);
-                importInput.value = '';
+            reader.onload = (event) => {
+                importSVG(event.target.result);
+                importInput.value = ''; // Clear the input
             };
             reader.readAsText(file);
         });
@@ -1490,7 +1480,15 @@
         }
 
         // Update the event listener
-        document.getElementById("exportSVG").addEventListener("click", exportSVG);
+        if (exportSVGBtn) {
+            exportSVGBtn.addEventListener("click", exportSVG);
+        }
+
+        if (importSVGBtn) {
+            importSVGBtn.addEventListener("click", () => {
+                importInput.click();
+            });
+        }
 
         function saveState() {
             if (isUndoRedoAction) {
@@ -1571,6 +1569,82 @@
             redoButton.disabled = currentHistoryIndex >= history.length - 1;
         }
 
+        function copySelection() {
+            if (selectedPixels.size === 0) return;
+
+            // Get the bounds of the selection
+            let minX = Infinity, minY = Infinity;
+            selectedPixels.forEach(pixel => {
+                const x = parseInt(pixel.getAttribute('data-x'));
+                const y = parseInt(pixel.getAttribute('data-y'));
+                minX = Math.min(minX, x);
+                minY = Math.min(minY, y);
+            });
+
+            // Store pixel data relative to top-left corner
+            clipboardData = Array.from(selectedPixels).map(pixel => ({
+                relativeX: parseInt(pixel.getAttribute('data-x')) - minX,
+                relativeY: parseInt(pixel.getAttribute('data-y')) - minY,
+                fill: pixel.getAttribute('fill')
+            }));
+
+            // Store the offset for future paste operations
+            clipboardOffset = { x: minX, y: minY };
+        }
+
+        function cutSelection() {
+            if (selectedPixels.size === 0) return;
+            
+            // Copy first
+            copySelection();
+            
+            // Then delete
+            selectedPixels.forEach(pixel => pixel.remove());
+            clearSelection();
+            saveState();
+        }
+
+        function pasteSelection() {
+            if (!clipboardData || !activeLayer) return;
+
+            // Clear current selection
+            clearSelection();
+
+            // Calculate paste position based on mouse position
+            const rect = activeLayer.getBoundingClientRect();
+            const mouseX = lastPanX || rect.left + rect.width / 2;
+            const mouseY = lastPanY || rect.top + rect.height / 2;
+            const gridPos = screenToGridCoordinates(mouseX, mouseY);
+
+            // Create new pixels
+            selectedPixels.clear();
+            clipboardData.forEach(data => {
+                const newX = gridPos.x + data.relativeX;
+                const newY = gridPos.y + data.relativeY;
+                
+                // Remove any existing pixel at this position
+                const existingPixel = Array.from(activeLayer.children).find(pixel => 
+                    parseInt(pixel.getAttribute('data-x')) === newX && 
+                    parseInt(pixel.getAttribute('data-y')) === newY
+                );
+                if (existingPixel) {
+                    existingPixel.remove();
+                }
+
+                // Create new pixel
+                const newPixel = createPixelPath(newX, newY, data.fill);
+                newPixel.setAttribute('data-x', newX);
+                newPixel.setAttribute('data-y', newY);
+                activeLayer.appendChild(newPixel);
+                
+                // Add to selection
+                selectedPixels.add(newPixel);
+                newPixel.classList.add('selected-pixel');
+            });
+
+            saveState();
+        }
+
         // Undo/Redo handlers
         undoButton.addEventListener('click', () => {
             if (currentHistoryIndex > 0) {
@@ -1592,36 +1666,23 @@
 
         // Keyboard shortcuts
         document.addEventListener('keydown', (e) => {
-            if (currentTool === 'select' && selectedPixels.size > 0) {
-                if (e.key === 'Delete' || e.key === 'Backspace') {
+            if (currentTool === 'select') {
+                if (e.ctrlKey) {
+                    if (e.key.toLowerCase() === 'c') {
+                        e.preventDeault();
+                        copySelection();
+                    } else if (e.key.toLowerCase() === 'v') {
+                        e.preventDefault();
+                        pasteSelection();
+                    } else if (e.key.toLowerCase() === 'x') {
+                        e.preventDefault();
+                        cutSelection();
+                    }
+                } else if ((e.key === 'Delete' || e.key === 'Backspace') && selectedPixels.size > 0) {
                     e.preventDefault();
-                    
-                    // Store the current state before deletion
-                    const deletedPixels = new Set(selectedPixels);
-                    const pixelData = new Map();
-                    
-                    // Store information about pixels before deletion
-                    deletedPixels.forEach(pixel => {
-                        pixelData.set(pixel, {
-                            x: parseInt(pixel.getAttribute('data-x')),
-                            y: parseInt(pixel.getAttribute('data-y')),
-                            fill: pixel.getAttribute('fill')
-                        });
-                        pixel.remove();
-                    });
-                    
-                    // Clear selection after deletion
+                    selectedPixels.forEach(pixel => pixel.remove());
                     clearSelection();
-                    
-                    // Save state to history
                     saveState();
-                    
-                } else if (e.ctrlKey && e.key.toLowerCase() === 'c') {
-                    e.preventDefault();
-                    copySelection();
-                } else if (e.ctrlKey && e.key.toLowerCase() === 'v') {
-                    e.preventDefault();
-                    pasteSelection();
                 }
             }
         });
