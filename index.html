@@ -280,6 +280,24 @@
             border-bottom: none;
             margin-bottom: 0;
         }
+
+        .panning {
+            cursor: move !important; /* Show move cursor while panning */
+        }
+
+        .panning::after {
+            content: "+";
+            position: fixed;
+            color: white;
+            font-size: 24px;
+            pointer-events: none;
+            transform: translate(-50%, -50%);
+            text-shadow: 
+                1px 1px 2px rgba(0, 0, 0, 0.8),
+                -1px -1px 2px rgba(0, 0, 0, 0.8),
+                1px -1px 2px rgba(0, 0, 0, 0.8),
+                -1px 1px 2px rgba(0, 0, 0, 0.8);
+        }
     </style>
 </head>
 <body>
@@ -374,6 +392,7 @@
         let isDraggingSelection = false;
         let dragOffset = { x: 0, y: 0 };
         let originalPositions = new Map();
+        let panningCursor = null;
 
         // History management
         const MAX_HISTORY = 30;
@@ -885,13 +904,23 @@
 
         function clearSelection() {
             selectedPixels.forEach(pixel => {
-                pixel.classList.remove('selected-pixel');
+                if (pixel && pixel.classList) {
+                    pixel.classList.remove('selected-pixel');
+                }
             });
             selectedPixels.clear();
             originalPositions.clear();
             selectionStart = null;
             selectionEnd = null;
             selectionOverlay.style.display = 'none';
+            
+            // Ensure the selection overlay is reset
+            const overlay = document.getElementById('selectionOverlay');
+            if (overlay) {
+                overlay.style.width = '0';
+                overlay.style.height = '0';
+                overlay.style.display = 'none';
+            }
         }
 
         function isPixelInSelection(clientX, clientY) {
@@ -901,6 +930,67 @@
                 const pixelY = parseInt(pixel.getAttribute('data-y'));
                 return pixelX === gridPos.x && pixelY === gridPos.y;
             });
+        }
+
+        function handlePanning(e) {
+            if (!isPanning) {
+                isPanning = true;
+                lastPanX = e.clientX;
+                lastPanY = e.clientY;
+                
+                // Create and add panning cursor
+                document.body.classList.add('panning');
+                if (!panningCursor) {
+                    panningCursor = document.createElement('div');
+                    panningCursor.style.position = 'fixed';
+                    panningCursor.style.left = `${e.clientX}px`;
+                    panningCursor.style.top = `${e.clientY}px`;
+                    panningCursor.textContent = '+';
+                    panningCursor.style.pointerEvents = 'none';
+                    panningCursor.style.zIndex = '9999';
+                    panningCursor.style.color = 'white';
+                    panningCursor.style.fontSize = '24px';
+                    panningCursor.style.textShadow = `
+                        1px 1px 2px rgba(0, 0, 0, 0.8),
+                        -1px -1px 2px rgba(0, 0, 0, 0.8),
+                        1px -1px 2px rgba(0, 0, 0, 0.8),
+                        -1px 1px 2px rgba(0, 0, 0, 0.8)
+                    `;
+                    panningCursor.style.transform = 'translate(-50%, -50%)';
+                    document.body.appendChild(panningCursor);
+                }
+                return true;
+            }
+            
+            const deltaX = e.clientX - lastPanX;
+            const deltaY = e.clientY - lastPanY;
+            
+            viewportOffsetX -= deltaX;
+            viewportOffsetY -= deltaY;
+            
+            lastPanX = e.clientX;
+            lastPanY = e.clientY;
+            
+            // Update cursor position
+            if (panningCursor) {
+                panningCursor.style.left = `${e.clientX}px`;
+                panningCursor.style.top = `${e.clientY}px`;
+            }
+            
+            updateAllPixels();
+            updateGridPosition();
+            return true;
+        }
+
+        function cleanupPanning() {
+            if (isPanning) {
+                document.body.classList.remove('panning');
+                if (panningCursor && panningCursor.parentNode) {
+                    panningCursor.parentNode.removeChild(panningCursor);
+                    panningCursor = null;
+                }
+            }
+            isPanning = false;
         }
 
         bendSlider.addEventListener('input', (e) => {
@@ -1040,12 +1130,18 @@
         addLayerButton.addEventListener('click', createLayer);
 
         // Mouse event listeners
+
         document.addEventListener('mousedown', (e) => {
             if (!e.target.closest('#svgCanvasContainer')) return;
             e.preventDefault();
 
+            // Handle panning first, regardless of current tool
+            if ((e.ctrlKey && e.buttons === 1) || e.buttons === 4) { // 4 is middle mouse button
+                handlePanning(e);
+                return;
+            }
+
             if (currentTool === 'pencil') {
-                // Existing pencil tool logic
                 isDrawing = true;
                 hasDrawnPixel = false;
                 const originalColor = currentColor;
@@ -1105,8 +1201,13 @@
         document.addEventListener('mousemove', (e) => {
             if (!e.target.closest('#svgCanvasContainer')) return;
 
+            // Handle panning first, regardless of current tool
+            if (isPanning && ((e.ctrlKey && e.buttons === 1) || e.buttons === 4)) {
+                handlePanning(e);
+                return;
+            }
+
             if (currentTool === 'pencil' && isDrawing) {
-                // Existing pencil tool logic
                 const originalColor = currentColor;
                 if (e.buttons === 2) currentColor = null;
                 drawPixel(e);
@@ -1137,6 +1238,7 @@
         });
 
         document.addEventListener('mouseup', (e) => {
+            cleanupPanning();
             if (currentTool === 'pencil') {
                 if (isDrawing && hasDrawnPixel) {
                     saveState();
@@ -1176,6 +1278,7 @@
         });
         
         document.addEventListener('mouseleave', () => {
+            cleanupPanning();
             if (isDrawing && hasDrawnPixel) {
                 saveState();
             }
@@ -1492,17 +1595,31 @@
             if (currentTool === 'select' && selectedPixels.size > 0) {
                 if (e.key === 'Delete' || e.key === 'Backspace') {
                     e.preventDefault();
-                    selectedPixels.forEach(pixel => {
+                    
+                    // Store the current state before deletion
+                    const deletedPixels = new Set(selectedPixels);
+                    const pixelData = new Map();
+                    
+                    // Store information about pixels before deletion
+                    deletedPixels.forEach(pixel => {
+                        pixelData.set(pixel, {
+                            x: parseInt(pixel.getAttribute('data-x')),
+                            y: parseInt(pixel.getAttribute('data-y')),
+                            fill: pixel.getAttribute('fill')
+                        });
                         pixel.remove();
                     });
+                    
+                    // Clear selection after deletion
                     clearSelection();
+                    
+                    // Save state to history
                     saveState();
+                    
                 } else if (e.ctrlKey && e.key.toLowerCase() === 'c') {
-                    // Copy selection to clipboard (you would need to implement clipboard handling)
                     e.preventDefault();
                     copySelection();
                 } else if (e.ctrlKey && e.key.toLowerCase() === 'v') {
-                    // Paste from clipboard (you would need to implement clipboard handling)
                     e.preventDefault();
                     pasteSelection();
                 }
@@ -1520,6 +1637,12 @@
             currentTool = 'select';
             selectToolBtn.classList.add('selected');
             pencilToolBtn.classList.remove('selected');
+        });
+
+        svgCanvasContainer.addEventListener('mousedown', (e) => {
+            if (e.button === 1) { // Middle mouse button
+                e.preventDefault();
+            }
         });
 
         function initializeApp() {
