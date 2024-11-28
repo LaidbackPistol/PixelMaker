@@ -837,13 +837,26 @@
         function updateSelection() {
             if (!activeLayer || !selectionStart || !selectionEnd) return;
 
+            // Get the actual selection overlay position and size
             const rect = svgCanvasContainer.getBoundingClientRect();
-            
-            // Convert screen coordinates to grid coordinates
-            const gridStart = screenToGridCoordinates(selectionStart.x + rect.left, selectionStart.y + rect.top);
-            const gridEnd = screenToGridCoordinates(selectionEnd.x + rect.left, selectionEnd.y + rect.top);
-            
-            // Calculate grid bounds
+            const overlayRect = selectionOverlay.getBoundingClientRect();
+
+            // Calculate relative positions to the container
+            const overlayStart = {
+                x: overlayRect.left - rect.left,
+                y: overlayRect.top - rect.top
+            };
+
+            const overlayEnd = {
+                x: overlayStart.x + overlayRect.width - 1,
+                y: overlayStart.y + overlayRect.height - 1
+            };
+
+            // Convert to grid coordinates
+            const gridStart = screenToGridCoordinates(overlayStart.x + rect.left, overlayStart.y + rect.top);
+            const gridEnd = screenToGridCoordinates(overlayEnd.x + rect.left, overlayEnd.y + rect.top);
+
+            // Make sure we include all pixels within the selection bounds
             const minX = Math.min(gridStart.x, gridEnd.x);
             const maxX = Math.max(gridStart.x, gridEnd.x);
             const minY = Math.min(gridStart.y, gridEnd.y);
@@ -855,6 +868,7 @@
                     const x = parseInt(pixel.getAttribute('data-x'));
                     const y = parseInt(pixel.getAttribute('data-y'));
 
+                    // Check if pixel is within the selection bounds
                     if (x >= minX && x <= maxX && y >= minY && y <= maxY) {
                         selectedPixels.add(pixel);
                         pixel.classList.add('selected-pixel');
@@ -863,6 +877,10 @@
                     }
                 }
             });
+
+            // Reset selection coordinates after applying the selection
+            selectionStart = null;
+            selectionEnd = null;
         }
 
         function clearSelection() {
@@ -1052,15 +1070,32 @@
                             });
                         });
                     } else {
-                        // Start new selection
-                        isSelecting = true;
-                        clearSelection();
-                        selectionStart = {
-                            x: e.clientX - rect.left,
-                            y: e.clientY - rect.top
-                        };
-                        selectionOverlay.style.display = 'block';
-                        updateSelectionOverlay();
+                        // Reset all selection state before starting a new one
+                        isSelecting = false;
+                        isDraggingSelection = false;
+                        selectionStart = null;
+                        selectionEnd = null;
+                        selectedPixels.clear();
+                        originalPositions.clear();
+                        selectionOverlay.style.display = 'none';
+                        // Reset the overlay dimensions
+                        selectionOverlay.style.width = '0';
+                        selectionOverlay.style.height = '0';
+                        Array.from(activeLayer.children).forEach(pixel => {
+                            pixel.classList.remove('selected-pixel');
+                        });
+                        
+                        // Now start the new selection
+                        requestAnimationFrame(() => {
+                            isSelecting = true;
+                            selectionStart = {
+                                x: e.clientX - rect.left,
+                                y: e.clientY - rect.top
+                            };
+                            selectionEnd = selectionStart; // Initialize end to be same as start
+                            selectionOverlay.style.display = 'block';
+                            updateSelectionOverlay();
+                        });
                     }
                 }
             }
@@ -1111,21 +1146,22 @@
                 if (isSelecting) {
                     isSelecting = false;
                     updateSelection();
+                    // Nettoyage complet des données du rectangle de sélection après avoir appliqué la sélection
                     selectionOverlay.style.display = 'none';
+                    selectionStart = null;
+                    selectionEnd = null;
                 } else if (isDraggingSelection) {
                     // Handle pixel replacement on drag end
                     selectedPixels.forEach(pixel => {
                         const x = parseInt(pixel.getAttribute('data-x'));
                         const y = parseInt(pixel.getAttribute('data-y'));
                         
-                        // Find any existing pixel at this position (except the current one)
                         const existingPixel = Array.from(activeLayer.children).find(element => {
                             if (element === pixel) return false;
                             return parseInt(element.getAttribute("data-x")) === x && 
                                 parseInt(element.getAttribute("data-y")) === y;
                         });
 
-                        // Remove existing pixel if found
                         if (existingPixel) {
                             activeLayer.removeChild(existingPixel);
                         }
