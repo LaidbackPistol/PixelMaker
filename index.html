@@ -284,20 +284,6 @@
         .panning {
             cursor: move !important; /* Show move cursor while panning */
         }
-
-        .panning::after {
-            content: "+";
-            position: fixed;
-            color: white;
-            font-size: 24px;
-            pointer-events: none;
-            transform: translate(-50%, -50%);
-            text-shadow: 
-                1px 1px 2px rgba(0, 0, 0, 0.8),
-                -1px -1px 2px rgba(0, 0, 0, 0.8),
-                1px -1px 2px rgba(0, 0, 0, 0.8),
-                -1px 1px 2px rgba(0, 0, 0, 0.8);
-        }
     </style>
 </head>
 <body>
@@ -538,6 +524,32 @@
             });
         }
 
+        function exportPalette() {
+            // Create SVG with palette data
+            const svg = document.createElementNS("http://www.w3.org/2000/svg", "svg");
+            svg.setAttribute("width", "0");
+            svg.setAttribute("height", "0");
+            
+            // Add palette data as metadata
+            const metadata = document.createElementNS("http://www.w3.org/2000/svg", "metadata");
+            metadata.textContent = JSON.stringify(palette);
+            svg.appendChild(metadata);
+            
+            // Create and trigger download
+            const serializer = new XMLSerializer();
+            const svgBlob = new Blob([serializer.serializeToString(svg)], { type: "image/svg+xml" });
+            const url = URL.createObjectURL(svgBlob);
+            
+            const link = document.createElement("a");
+            link.href = url;
+            link.download = "palette.svg";
+            link.click();
+            
+            URL.revokeObjectURL(url);
+        }
+
+        exportPaletteButton.addEventListener('click', exportPalette);
+
         function initializeLayers() {
             createLayer();
             updateAddLayerButton();
@@ -551,13 +563,12 @@
             layers.push(newLayer);
             svgCanvasContainer.appendChild(newLayer.svg);
             
-            if (!activeLayer) {
-                setActiveLayer(newLayer.id);
-            }
+            // Always set the new layer as active
+            setActiveLayer(newLayer.id);
 
             updateAddLayerButton();
             renderLayerPanel();
-            saveState(); // Save state after creating layer
+            saveState();
             return newLayer;
         }
 
@@ -953,46 +964,21 @@
                 isPanning = true;
                 lastPanX = e.clientX;
                 lastPanY = e.clientY;
-                
-                // Create and add panning cursor
+                        
+                // Just add the panning class without creating additional cursor
                 document.body.classList.add('panning');
-                if (!panningCursor) {
-                    panningCursor = document.createElement('div');
-                    panningCursor.style.position = 'fixed';
-                    panningCursor.style.left = `${e.clientX}px`;
-                    panningCursor.style.top = `${e.clientY}px`;
-                    panningCursor.textContent = '+';
-                    panningCursor.style.pointerEvents = 'none';
-                    panningCursor.style.zIndex = '9999';
-                    panningCursor.style.color = 'white';
-                    panningCursor.style.fontSize = '24px';
-                    panningCursor.style.textShadow = `
-                        1px 1px 2px rgba(0, 0, 0, 0.8),
-                        -1px -1px 2px rgba(0, 0, 0, 0.8),
-                        1px -1px 2px rgba(0, 0, 0, 0.8),
-                        -1px 1px 2px rgba(0, 0, 0, 0.8)
-                    `;
-                    panningCursor.style.transform = 'translate(-50%, -50%)';
-                    document.body.appendChild(panningCursor);
-                }
                 return true;
             }
-            
+                    
             const deltaX = e.clientX - lastPanX;
             const deltaY = e.clientY - lastPanY;
-            
+                    
             viewportOffsetX -= deltaX;
             viewportOffsetY -= deltaY;
-            
+                    
             lastPanX = e.clientX;
             lastPanY = e.clientY;
-            
-            // Update cursor position
-            if (panningCursor) {
-                panningCursor.style.left = `${e.clientX}px`;
-                panningCursor.style.top = `${e.clientY}px`;
-            }
-            
+                    
             updateAllPixels();
             updateGridPosition();
             return true;
@@ -1001,10 +987,6 @@
         function cleanupPanning() {
             if (isPanning) {
                 document.body.classList.remove('panning');
-                if (panningCursor && panningCursor.parentNode) {
-                    panningCursor.parentNode.removeChild(panningCursor);
-                    panningCursor = null;
-                }
             }
             isPanning = false;
         }
@@ -1033,14 +1015,7 @@
 
         // Modify create layer function to include filters
         const originalCreateLayer = createLayer;
-        createLayer = function() {
-            const layer = originalCreateLayer();
-            if (layer) {
-                updateFilters(layer.svg);
-            }
-            return layer;
-        };
-
+        
         function updateAllPixels() {
             layers.forEach(layer => {
                 Array.from(layer.svg.children).forEach(pixel => {
@@ -1389,6 +1364,17 @@
             const newColor = e.target.value;
             palette[index] = newColor;
             initializePalette();
+            
+            // Select the changed color after initializing palette
+            const newColorElement = document.querySelector(`.palette-color[data-index="${index}"]`);
+            if (newColorElement) {
+                document.querySelectorAll('.palette-color, .eraser-tile').forEach(el => {
+                    el.classList.remove('selected');
+                });
+                newColorElement.classList.add('selected');
+                currentColor = newColor;
+                selectedPaletteIndex = index;
+            }
         });
 
         resetPaletteButton.addEventListener('click', () => {
@@ -1398,6 +1384,33 @@
 
         importPaletteButton.addEventListener('click', () => {
             importPaletteInput.click();
+        });
+
+        importPaletteInput.addEventListener('change', (e) => {
+            const file = e.target.files[0];
+            if (!file) return;
+            
+            const reader = new FileReader();
+            reader.onload = (event) => {
+                try {
+                    const parser = new DOMParser();
+                    const svgDoc = parser.parseFromString(event.target.result, 'image/svg+xml');
+                    const metadata = svgDoc.getElementsByTagName('metadata')[0];
+                    
+                    if (metadata) {
+                        const importedPalette = JSON.parse(metadata.textContent);
+                        if (Array.isArray(importedPalette)) {
+                            palette = importedPalette;
+                            initializePalette();
+                        }
+                    }
+                } catch (error) {
+                    console.error('Error importing palette:', error);
+                    alert('Error importing palette. Please make sure the file is a valid palette SVG.');
+                }
+                importPaletteInput.value = ''; // Clear the input
+            };
+            reader.readAsText(file);
         });
 
         function importSVG(svgContent) {
@@ -1687,23 +1700,125 @@
 
         // Keyboard shortcuts
         document.addEventListener('keydown', (e) => {
-            if (currentTool === 'select') {
-                if (e.ctrlKey) {
-                    if (e.key.toLowerCase() === 'c') {
-                        e.preventDeault();
-                        copySelection();
-                    } else if (e.key.toLowerCase() === 'v') {
-                        e.preventDefault();
-                        pasteSelection();
-                    } else if (e.key.toLowerCase() === 'x') {
-                        e.preventDefault();
-                        cutSelection();
-                    }
-                } else if ((e.key === 'Delete' || e.key === 'Backspace') && selectedPixels.size > 0) {
+            // Handle tool shortcuts
+            if (e.key === 'a' || e.key === 'A') {
+                currentTool = 'pencil';
+                pencilToolBtn.classList.add('selected');
+                selectToolBtn.classList.remove('selected');
+                clearSelection();
+            } else if (e.key === 'z' || e.key === 'Z') {
+                currentTool = 'select';
+                selectToolBtn.classList.add('selected');
+                pencilToolBtn.classList.remove('selected');
+            }
+
+            // Undo/Redo (Ctrl+Z, Ctrl+Y)
+            if (e.ctrlKey) {
+                if (e.key === 'z' || e.key === 'Z') {
                     e.preventDefault();
-                    selectedPixels.forEach(pixel => pixel.remove());
-                    clearSelection();
-                    saveState();
+                    if (e.shiftKey && currentHistoryIndex < history.length - 1) {
+                        // Ctrl+Shift+Z for Redo
+                        isUndoRedoAction = true;
+                        currentHistoryIndex++;
+                        loadState(history[currentHistoryIndex]);
+                        updateUndoRedoButtons();
+                    } else if (!e.shiftKey && currentHistoryIndex > 0) {
+                        // Ctrl+Z for Undo
+                        isUndoRedoAction = true;
+                        currentHistoryIndex--;
+                        loadState(history[currentHistoryIndex]);
+                        updateUndoRedoButtons();
+                    }
+                } else if ((e.key === 'y' || e.key === 'Y') && currentHistoryIndex < history.length - 1) {
+                    // Ctrl+Y for Redo
+                    e.preventDefault();
+                    isUndoRedoAction = true;
+                    currentHistoryIndex++;
+                    loadState(history[currentHistoryIndex]);
+                    updateUndoRedoButtons();
+                }
+            }
+
+            // Layer visibility toggle (V + number)
+            if ((e.key === 'v' || e.key === 'V') && !e.ctrlKey) {
+                const layerKeys = {
+                    '&': 0, 'é': 1, '"': 2, "'": 3, '(': 4,
+                    '1': 0, '2': 1, '3': 2, '4': 3, '5': 4
+                };
+                
+                const handler = (key) => {
+                    const index = layerKeys[key];
+                    if (index !== undefined && index < layers.length) {
+                        toggleLayerVisibility(layers[index].id);
+                    }
+                };
+
+                // Set up one-time keypress listener for the number
+                const listener = (event) => {
+                    handler(event.key);
+                    document.removeEventListener('keydown', listener);
+                };
+                document.addEventListener('keydown', listener);
+            }
+
+            // Delete/Backspace to delete selected pixels
+            if ((e.key === 'Delete' || e.key === 'Backspace') && selectedPixels.size > 0) {
+                e.preventDefault();
+                selectedPixels.forEach(pixel => pixel.remove());
+                clearSelection();
+                saveState();
+            }
+
+            // Space to temporarily switch to pan tool
+            if (e.key === ' ' && !isPanning) {
+                e.preventDefault();
+                const savedTool = currentTool;
+                currentTool = 'pan';
+                
+                const spaceUpHandler = () => {
+                    currentTool = savedTool;
+                    document.removeEventListener('keyup', spaceUpHandler);
+                };
+                document.addEventListener('keyup', spaceUpHandler);
+            }
+
+            // ESC to clear selection
+            if (e.key === 'Escape') {
+                clearSelection();
+            }
+
+            // Number key shortcuts for palette colors (1-5 and special chars)
+            const keyMappings = {
+                '&': 0, 
+                'é': 1,
+                '"': 2,
+                "'": 3,
+                '(': 4,
+                '²': 'eraser'
+            };
+            
+            const numKey = e.key;
+            const index = keyMappings[numKey] ?? parseInt(numKey) - 1;
+
+            if ((numKey >= '1' && numKey <= '5') || numKey in keyMappings) {
+                if (numKey === '²') {
+                    // Handle eraser
+                    document.querySelectorAll('.palette-color, .eraser-tile').forEach(el => {
+                        el.classList.remove('selected');
+                    });
+                    document.querySelector('.eraser-tile').classList.add('selected');
+                    currentColor = null;
+                } else if (index >= 0 && index < palette.length) {
+                    // Handle color selection
+                    document.querySelectorAll('.palette-color, .eraser-tile').forEach(el => {
+                        el.classList.remove('selected');
+                    });
+                    const colorElement = document.querySelector(`.palette-color[data-index="${index}"]`);
+                    if (colorElement) {
+                        colorElement.classList.add('selected');
+                        currentColor = palette[index];
+                        selectedPaletteIndex = index;
+                    }
                 }
             }
         });
