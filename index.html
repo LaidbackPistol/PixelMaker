@@ -326,12 +326,29 @@
         <button id="redoButton" disabled>Redo</button>
     </div>
 
+    <div id="svgCanvasContainer">
+        <!-- SVG layers will be dynamically added here -->
+        <div id="selectionOverlay" style="display: none; position: absolute; border: 1px dashed white; pointer-events: none;"></div>
+    </div>
+
+    <div id="layerPanel">
+        <div id="layerList"></div>
+        <button id="addLayerButton">Add Layer</button>
+    </div>
+
     <div id="modifierControls">
         <div class="modifier-group">
             <div class="modifier-control">
                 <label for="bendSlider">Edge Bend:</label>
                 <input type="range" id="bendSlider" class="modifier-slider" min="-5" max="5" value="0" step="0.1">
                 <span id="bendValue" class="modifier-value">0.0</span>
+            </div>
+        </div>
+        <div class="modifier-group">
+            <div class="modifier-control">
+                <label for="scaleSlider">Pixel Scale:</label>
+                <input type="range" id="scaleSlider" class="modifier-slider" min="0.1" max="2" value="1" step="0.1">
+                <span id="scaleValue" class="modifier-value">1.0</span>
             </div>
         </div>
         <div class="modifier-group">
@@ -346,16 +363,6 @@
                 <span id="blurYValue" class="modifier-value">0.0</span>
             </div>
         </div>
-    </div>
-
-    <div id="svgCanvasContainer">
-        <!-- SVG layers will be dynamically added here -->
-        <div id="selectionOverlay" style="display: none; position: absolute; border: 1px dashed white; pointer-events: none;"></div>
-    </div>
-
-    <div id="layerPanel">
-        <div id="layerList"></div>
-        <button id="addLayerButton">Add Layer</button>
     </div>
 
     <script>
@@ -389,6 +396,7 @@
         let panningCursor = null;
         let clipboardData = null;
         let clipboardOffset = null;
+        let pixelScale = 1.0;
 
         // History management
         const MAX_HISTORY = 30;
@@ -436,6 +444,8 @@
         const pencilToolBtn = document.getElementById('pencilTool');
         const selectToolBtn = document.getElementById('selectTool');
         const selectionOverlay = document.getElementById('selectionOverlay');
+        const scaleSlider = document.getElementById('scaleSlider');
+        const scaleValue = document.getElementById('scaleValue');
 
         // Updated Layer class
         class Layer {
@@ -791,28 +801,39 @@
 
         function updatePixelPath(path, gridX, gridY) {
             const screenPos = gridToScreenCoordinates(gridX, gridY);
-            const size = gridSize;
+            const size = gridSize * pixelScale;
             const bend = bendAmount;
             
             // Calculate control points for the curves
             const cp = Math.abs(bend);
             const sign = Math.sign(bend);
             
+            // Calculate offset to keep pixel centered in grid cell
+            const offset = (gridSize - size) / 2;
+            
             // Create path with curved edges using screen coordinates
             let d = [
-                `M ${screenPos.x} ${screenPos.y}`,
+                `M ${screenPos.x + offset} ${screenPos.y + offset}`,
                 
                 // Top edge (curved)
-                `C ${screenPos.x + cp} ${screenPos.y - sign * cp}, ${screenPos.x + size - cp} ${screenPos.y - sign * cp}, ${screenPos.x + size} ${screenPos.y}`,
+                `C ${screenPos.x + offset + cp} ${screenPos.y + offset - sign * cp}, 
+                ${screenPos.x + offset + size - cp} ${screenPos.y + offset - sign * cp}, 
+                ${screenPos.x + offset + size} ${screenPos.y + offset}`,
                 
                 // Right edge (curved)
-                `C ${screenPos.x + size + sign * cp} ${screenPos.y + cp}, ${screenPos.x + size + sign * cp} ${screenPos.y + size - cp}, ${screenPos.x + size} ${screenPos.y + size}`,
+                `C ${screenPos.x + offset + size + sign * cp} ${screenPos.y + offset + cp}, 
+                ${screenPos.x + offset + size + sign * cp} ${screenPos.y + offset + size - cp}, 
+                ${screenPos.x + offset + size} ${screenPos.y + offset + size}`,
                 
                 // Bottom edge (curved)
-                `C ${screenPos.x + size - cp} ${screenPos.y + size + sign * cp}, ${screenPos.x + cp} ${screenPos.y + size + sign * cp}, ${screenPos.x} ${screenPos.y + size}`,
+                `C ${screenPos.x + offset + size - cp} ${screenPos.y + offset + size + sign * cp}, 
+                ${screenPos.x + offset + cp} ${screenPos.y + offset + size + sign * cp}, 
+                ${screenPos.x + offset} ${screenPos.y + offset + size}`,
                 
                 // Left edge (curved)
-                `C ${screenPos.x - sign * cp} ${screenPos.y + size - cp}, ${screenPos.x - sign * cp} ${screenPos.y + cp}, ${screenPos.x} ${screenPos.y}`,
+                `C ${screenPos.x + offset - sign * cp} ${screenPos.y + offset + size - cp}, 
+                ${screenPos.x + offset - sign * cp} ${screenPos.y + offset + cp}, 
+                ${screenPos.x + offset} ${screenPos.y + offset}`,
                 
                 'Z'
             ].join(' ');
@@ -1704,6 +1725,12 @@
             if (e.button === 1) { // Middle mouse button
                 e.preventDefault();
             }
+        });
+
+        scaleSlider.addEventListener('input', (e) => {
+            pixelScale = parseFloat(e.target.value);
+            scaleValue.textContent = pixelScale.toFixed(1);
+            updateAllPixels();
         });
 
         function initializeApp() {
