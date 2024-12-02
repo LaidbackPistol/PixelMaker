@@ -1821,6 +1821,50 @@
                     }
                 }
             }
+
+            if (e.key === 'r' || e.key === 'R') {
+                e.preventDefault(); // Prevent the 'r' key from being written in the input
+                // Find the selected layer
+                const selectedLayer = layers.find(l => l.id === activeLayerId);
+                if (selectedLayer) {
+                    // Create input for renaming
+                    const input = document.createElement('input');
+                    input.type = 'text';
+                    input.value = selectedLayer.name;
+                    input.className = 'layer-name-input';
+
+                    // Find the current name button
+                    const nameButton = document.querySelector(`.layer-item[data-layer-id="${activeLayerId}"] .layer-name-button`);
+                    if (nameButton) {
+                        nameButton.replaceWith(input);
+                        input.focus();
+                        input.select();
+
+                        function saveNewName() {
+                            const newName = input.value.trim();
+                            if (newName && newName !== selectedLayer.name) {
+                                if (layers.some(l => l.id !== selectedLayer.id && l.name === newName)) {
+                                    alert('A layer with this name already exists. Please choose a different name.');
+                                    return;
+                                }
+                                selectedLayer.name = newName;
+                                saveState();
+                            }
+                            renderLayerPanel();
+                        }
+
+                        input.addEventListener('blur', saveNewName);
+                        input.addEventListener('keydown', (e) => {
+                            if (e.key === 'Enter') {
+                                e.preventDefault();
+                                saveNewName();
+                            } else if (e.key === 'Escape') {
+                                renderLayerPanel();
+                            }
+                        });
+                    }
+                }
+            }
         });
 
         pencilToolBtn.addEventListener('click', () => {
